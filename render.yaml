@@ -1,21 +1,33 @@
 services:
   - type: web
     name: macrosniper-ai
-    env: python
+    runtime: python
     region: frankfurt
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
       - key: APP_ENV
         value: production
+      # Free permanent Postgres from neon.tech (SQLite on Render is wiped on every restart)
       - key: DATABASE_URL
-        value: sqlite+aiosqlite:///./macrosniper.db
+        sync: false
       - key: TELEGRAM_BOT_TOKEN
         sync: false
-      - key: TELEGRAM_VIP_CHANNEL_ID
+      - key: TELEGRAM_ADMIN_IDS
         sync: false
-      - key: GROQ_API_KEY
+      - key: TELEGRAM_CHANNEL_ID
         sync: false
-      - key: DEEPGRAM_API_KEY
+      - key: MINI_APP_URL
+        value: https://macrosniper-ai.onrender.com/miniapp
+      - key: ADMIN_API_TOKEN
+        generateValue: true
+      - key: FMP_API_KEY
         sync: false
+      - key: VIP_PRICE_STARS
+        value: "500"
+      - key: VIP_DAYS
+        value: "30"

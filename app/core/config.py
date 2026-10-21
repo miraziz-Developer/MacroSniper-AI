@@ -1,56 +1,69 @@
 from typing import List, Optional
-from pydantic import Field
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def normalize_database_url(url: str) -> str:
+    """Accepts Render/Neon style URLs (postgres://...?sslmode=require) and returns an asyncpg URL."""
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        url = "postgresql+asyncpg://" + url[len("postgresql://"):]
+    if url.startswith("postgresql+asyncpg://"):
+        # asyncpg rejects libpq-only params; SSL is passed via connect_args instead
+        parts = urlsplit(url)
+        query = [(k, v) for k, v in parse_qsl(parts.query) if k not in ("sslmode", "channel_binding")]
+        url = urlunsplit(parts._replace(query=urlencode(query)))
+    return url
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    # Application
-    APP_NAME: str = "MacroSniper AI"
+    APP_NAME: str = "MacroSniper"
     APP_ENV: str = "development"
-    APP_PORT: int = Field(default=8000, validation_alias="PORT")
-    SECRET_KEY: str = "secret-sniper-key"
 
-    # Database & Cache
     DATABASE_URL: str = "sqlite+aiosqlite:///./macrosniper.db"
-    REDIS_URL: str = "redis://localhost:6379/0"
-
-    # Economic Data API Keys
-    FMP_API_KEY: Optional[str] = None
-    FINNHUB_API_KEY: Optional[str] = None
-    ALPHA_VANTAGE_API_KEY: Optional[str] = None
+    DATA_DIR: str = "./data_cache"
 
     # Telegram
     TELEGRAM_BOT_TOKEN: Optional[str] = None
-    TELEGRAM_VIP_CHANNEL_ID: Optional[str] = None
-    TELEGRAM_FREE_CHANNEL_ID: Optional[str] = None
+    TELEGRAM_CHANNEL_ID: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("TELEGRAM_CHANNEL_ID", "TELEGRAM_VIP_CHANNEL_ID")
+    )
     TELEGRAM_ADMIN_IDS: str = ""
     MINI_APP_URL: str = "https://macrosniper-ai.onrender.com/miniapp"
 
+    # Set automatically by Render; enables the keep-awake self-ping (free instances sleep after 15 min)
+    RENDER_EXTERNAL_URL: Optional[str] = None
+
+    # Admin HTTP API (X-Admin-Token); unset = admin endpoints disabled
+    ADMIN_API_TOKEN: Optional[str] = None
+
+    # Optional: automatic actual values (free tier has delays; admin /actual is the fallback)
+    FMP_API_KEY: Optional[str] = None
+
+    # Subscription (Telegram Stars)
+    VIP_PRICE_STARS: int = 500
+    VIP_DAYS: int = 30
+
+    # Signal rules
+    CONVICTION_THRESHOLD: float = 50.0  # |context score| needed to name a primary side
+
+    @field_validator("DATABASE_URL")
+    @classmethod
+    def _normalize_db(cls, v: str) -> str:
+        return normalize_database_url(v)
+
     @property
-    def admin_id_list(self) -> List[int]:
-        if not self.TELEGRAM_ADMIN_IDS:
-            return []
-        return [int(x.strip()) for x in self.TELEGRAM_ADMIN_IDS.split(",") if x.strip().isdigit()]
+    def admin_ids(self) -> List[int]:
+        return [int(x) for x in (p.strip() for p in self.TELEGRAM_ADMIN_IDS.split(",")) if x.lstrip("-").isdigit()]
 
-    # Audio AI
-    DEEPGRAM_API_KEY: Optional[str] = None
-    GROQ_API_KEY: Optional[str] = None
-
-    # MT5 Broker Settings
-    MT5_ENABLED: bool = False
-    MT5_SERVER: Optional[str] = None
-    MT5_LOGIN: Optional[int] = None
-    MT5_PASSWORD: Optional[str] = None
-    MT5_PATH: Optional[str] = None
-
-    # Trading & Risk Rules
-    DEFAULT_SPREAD_BUFFER_GOLD: float = 1.80  # XAUUSD news spread buffer in points ($)
-    DEFAULT_ATR_PERIOD: int = 14
-    HIGH_CONVICTION_THRESHOLD: float = 65.0   # |S_total| >= 65 -> Limit Trap + Stop Breakout
-    MEDIUM_CONVICTION_THRESHOLD: float = 40.0 # 40 <= |S_total| < 65 -> Wide Limit Trap only
-    KILL_SWITCH_AUTO_EXECUTE: bool = True     # 5:00:01 emergency cancel & flip if shock occurs
+    @property
+    def bot_enabled(self) -> bool:
+        return bool(self.TELEGRAM_BOT_TOKEN)
 
 
 settings = Settings()

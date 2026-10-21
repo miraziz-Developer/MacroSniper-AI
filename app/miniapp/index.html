@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MacroSniper</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #0f141c);
+    --card: var(--tg-theme-secondary-bg-color, #182030);
+    --text: var(--tg-theme-text-color, #e8edf5);
+    --muted: var(--tg-theme-hint-color, #8a96a8);
+    --accent: var(--tg-theme-button-color, #3b82f6);
+    --accent-text: var(--tg-theme-button-text-color, #ffffff);
+    --buy: #16a34a;
+    --sell: #dc2626;
+    --line: rgba(138, 150, 168, 0.18);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 560px; margin: 0 auto; padding: 16px 16px 40px; }
+  header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+  h1 { font-size: 18px; margin: 0; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 22px 0 8px; }
+  .price { font: 700 20px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .card { background: var(--card); border-radius: 14px; padding: 14px; }
+  .row { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+  .title { font-weight: 600; }
+  .countdown { font: 700 22px/1.2 ui-monospace, Menlo, monospace; margin-top: 8px; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .pill.BUY { background: rgba(22,163,74,.15); color: var(--buy); }
+  .pill.SELL { background: rgba(220,38,38,.15); color: var(--sell); }
+  .pill.NEUTRAL, .pill.INLINE { background: rgba(138,150,168,.15); color: var(--muted); }
+  ul.reasons { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+  .side { border-left: 4px solid var(--line); padding: 8px 10px; margin-top: 10px; border-radius: 6px; background: rgba(0,0,0,.08); }
+  .side.BUY { border-color: var(--buy); }
+  .side.SELL { border-color: var(--sell); }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 6px; font: 13px ui-monospace, Menlo, monospace; }
+  .grid div span { display: block; color: var(--muted); font: 11px -apple-system, sans-serif; }
+  button { width: 100%; border: 0; border-radius: 10px; padding: 12px; font-size: 15px; font-weight: 600; background: var(--accent); color: var(--accent-text); margin-top: 12px; cursor: pointer; }
+  button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+  .list .item { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .list .item:last-child { border-bottom: 0; }
+  .note { font-size: 12px; color: var(--muted); margin-top: 18px; }
+  .err { color: var(--sell); font-size: 13px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>MacroSniper · XAUUSD</h1>
+    <div style="text-align:right">
+      <div class="price" id="price">—</div>
+      <div class="muted" id="price-src"></div>
+    </div>
+  </header>
+
+  <section class="card" id="focus"><div class="muted">Yuklanmoqda…</div></section>
+
+  <h2>Savdo rejasi</h2>
+  <section class="card" id="plan"></section>
+
+  <h2>Kalendar (7 kun, AQSH)</h2>
+  <section class="card list" id="calendar"></section>
+
+  <h2>So'nggi natijalar</h2>
+  <section class="card list" id="results"></section>
+
+  <p class="note">Bu moliyaviy maslahat emas. Bitta savdoda balansning 1–2% idan ko'p tavakkal qilmang. Vaqtlar — Toshkent.</p>
+  <div class="err" id="error"></div>
+</main>
+
+<script>
+const tg = window.Telegram ? window.Telegram.WebApp : null;
+if (tg) { tg.ready(); tg.expand(); }
+
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const num = (v, unit) => (v === null || v === undefined) ? '—' : `${v}${unit || ''}`;
+const money = (v) => Number(v).toFixed(2);
+const WEEKDAYS = ['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Jum', 'Shan'];
+// Fixed UTC+5 (Tashkent has no DST) so the format does not depend on the device locale
+const fmtTime = (iso) => {
+  const t = new Date(new Date(iso).getTime() + 5 * 3600000);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${WEEKDAYS[t.getUTCDay()]}, ${p(t.getUTCDate())}.${p(t.getUTCMonth() + 1)} ${p(t.getUTCHours())}:${p(t.getUTCMinutes())}`;
+};
+const SIDE = {BUY: 'BUY — oltin ko\'tariladi', SELL: 'SELL — oltin tushadi', NEUTRAL: 'Yo\'nalish noaniq', INLINE: 'Prognozga mos'};
+
+let state = null;
+let serverOffsetMs = 0;  // device clocks drift; count down against server time
+
+async function api(path, options = {}) {
+  const headers = Object.assign({}, options.headers, {'X-Telegram-Init-Data': tg ? tg.initData : ''});
+  const res = await fetch(path, Object.assign({}, options, {headers}));
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+function renderFocus() {
+  const ev = state.focus;
+  const el = document.getElementById('focus');
+  if (!ev) { el.innerHTML = '<div class="muted">Yaqin 7 kunda rejalashtiriladigan AQSH yangiligi yo\'q.</div>'; return; }
+  const reasons = ev.context_reasons.length ? `<ul class="reasons">${ev.context_reasons.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : '';
+  const bias = ev.context_bias ? `<div style="margin-top:10px"><span class="pill ${esc(ev.context_bias)}">${esc(SIDE[ev.context_bias] || ev.context_bias)}</span> <span class="muted">ball ${Math.round(ev.context_score)}</span></div>` : '<div class="muted" style="margin-top:10px">Kontekst tahlili yangilikdan 3 soat oldin chiqadi.</div>';
+  el.innerHTML = `
+    <div class="muted">Navbatdagi yangilik</div>
+    <div class="title">${esc(ev.title)}</div>
+    <div class="muted">${esc(fmtTime(ev.event_time))} · Prognoz ${esc(num(ev.forecast, ev.unit))} · Avvalgi ${esc(num(ev.previous, ev.unit))}</div>
+    <div class="countdown" id="countdown">--:--:--</div>
+    ${bias}${reasons}`;
+}
+
+function sideHtml(name, cls, s, price, primary) {
+  const star = primary === cls ? ' · <b>asosiy</b>' : '';
+  return `<div class="side ${cls}">
+    <div class="row"><b>${name}</b><span class="muted">narxdan ${(s.entry - price >= 0 ? '+' : '')}${money(s.entry - price)}$${star}</span></div>
+    <div class="grid">
+      <div><span>Kirish</span>${money(s.entry)}</div><div><span>SL</span>${money(s.sl)}</div>
+      <div><span>TP1</span>${money(s.tp1)}</div><div><span>TP2</span>${money(s.tp2)}</div>
+    </div></div>`;
+}
+
+function renderPlan() {
+  const el = document.getElementById('plan');
+  const p = state.plan;
+  if (p) {
+    el.innerHTML = `
+      <div class="muted">Narx ${money(p.price)} (${esc(p.source)}) · ATR(15m) ${money(p.atr)}$ · diapazon ${money(p.range[0])}–${money(p.range[1])}</div>
+      ${sideHtml('BUY STOP', 'BUY', p.buy, p.price, p.primary)}
+      ${sideHtml('SELL STOP', 'SELL', p.sell, p.price, p.primary)}
+      <div class="muted" style="margin-top:10px">${p.primary ? 'Teskari order — himoya.' : 'Ikkalasini qo\'ying; biri ochilsa, ikkinchisini bekor qiling.'} TP1 da yarmini yoping, SL ni kirishga o'tkazing.</div>
+      <button class="secondary" onclick="copyPlan()">📋 Nusxalash</button>`;
+    return;
+  }
+  if (state.user.is_vip) {
+    el.innerHTML = '<div class="muted">Reja yangilikdan 2 daqiqa oldin shu yerda va botda paydo bo\'ladi.</div>';
+    return;
+  }
+  const until = state.user.verified ? '' : '<div class="muted" style="margin-top:6px">Ilovani Telegram bot orqali oching.</div>';
+  el.innerHTML = `
+    <div>🔒 Aniq kirish, SL va TP darajalari — faqat VIP uchun.</div>
+    <div class="muted">${state.vip.stars} ⭐ / ${state.vip.days} kun · Telegram Stars orqali</div>
+    ${state.user.verified ? `<button onclick="buyVip()">💎 VIP olish — ${state.vip.stars} ⭐</button>` : until}`;
+}
+
+function renderList(id, events, emptyText, withOutcome) {
+  const el = document.getElementById(id);
+  if (!events.length) { el.innerHTML = `<div class="muted">${emptyText}</div>`; return; }
+  el.innerHTML = events.map(ev => {
+    const right = withOutcome
+      ? `<span class="pill ${esc(ev.outcome)}">${esc(ev.outcome === 'INLINE' ? 'Mos' : ev.outcome)}</span>`
+      : (ev.plannable ? '' : '<span class="muted">nutq</span>');
+    const nums = withOutcome
+      ? `Fakt ${esc(num(ev.actual, ev.unit))} · Prognoz ${esc(num(ev.forecast, ev.unit))}`
+      : `Prognoz ${esc(num(ev.forecast, ev.unit))} · Avvalgi ${esc(num(ev.previous, ev.unit))}`;
+    return `<div class="item"><div class="row"><span class="title">${esc(ev.title)}</span>${right}</div>
+      <div class="muted">${esc(fmtTime(ev.event_time))} · ${nums}</div></div>`;
+  }).join('');
+}
+
+function tick() {
+  const el = document.getElementById('countdown');
+  if (!el || !state || !state.focus) return;
+  const diff = new Date(state.focus.event_time) - (Date.now() + serverOffsetMs);
+  if (diff <= 0) { el.textContent = '⚡ Chiqdi'; return; }
+  const d = Math.floor(diff / 86400000), h = Math.floor(diff / 3600000) % 24, m = Math.floor(diff / 60000) % 60, s = Math.floor(diff / 1000) % 60;
+  const pad = (n) => String(n).padStart(2, '0');
+  el.textContent = `${d ? d + 'k ' : ''}${pad(h)}:${pad(m)}:${pad(s)}`;
+}
+
+async function refresh() {
+  try {
+    state = await api('/api/app/state');
+    serverOffsetMs = new Date(state.server_time) - Date.now();
+    document.getElementById('price').textContent = state.price.value ? money(state.price.value) : '—';
+    document.getElementById('price-src').textContent = state.price.source || '';
+    renderFocus(); renderPlan();
+    renderList('calendar', state.calendar, 'Yaqin 7 kunda muhim yangilik yo\'q.', false);
+    renderList('results', state.results, 'Hali natija yo\'q.', true);
+    document.getElementById('error').textContent = '';
+    tick();
+  } catch (e) {
+    document.getElementById('error').textContent = 'Server bilan aloqa yo\'q, qayta urinilmoqda…';
+  }
+}
+
+function copyPlan() {
+  const p = state.plan;
+  const line = (n, s) => `${n} XAUUSD ${money(s.entry)} | SL ${money(s.sl)} | TP1 ${money(s.tp1)} | TP2 ${money(s.tp2)}`;
+  navigator.clipboard.writeText(`${line('BUY STOP', p.buy)}\n${line('SELL STOP', p.sell)}`)
+    .then(() => tg && tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('success'));
+}
+
+async function buyVip() {
+  try {
+    const {link} = await api('/api/app/invoice', {method: 'POST'});
+    tg.openInvoice(link, (status) => { if (status === 'paid') setTimeout(refresh, 1500); });
+  } catch (e) {
+    document.getElementById('error').textContent = 'To\'lovni ochib bo\'lmadi. Botda /vip ni bosing.';
+  }
+}
+
+refresh();
+setInterval(refresh, 15000);
+setInterval(tick, 1000);
+</script>
+</body>
+</html>
