@@ -7,7 +7,7 @@ orqali VIP obunachilarga beradi. To'lov — Telegram Stars. Batafsil dizayn: [do
 ## Qanday ishlaydi
 
 ```
-ForexFactory (har 30 daq) ─► Event SCHEDULED
+ForexFactory (har 10 daq) ─► Event SCHEDULED
    T-3h  ─► Kontekst: DXY, US10Y (Yahoo) + prognoz/avvalgi  ─► VIP'larga "3 soat qoldi"
    T-2m  ─► Reja: 15m ATR(14) + 4 soatlik diapazon (Binance PAXG / COMEX) ─► BUY STOP + SELL STOP
    T+20s ─► Fakt: FMP (kalit bo'lsa) yoki admin /actual ─► qaysi order qoladi ─► VIP + kanal

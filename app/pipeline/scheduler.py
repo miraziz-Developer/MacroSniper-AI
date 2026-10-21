@@ -70,9 +70,9 @@ def start() -> None:
         return
     if settings.RENDER_EXTERNAL_URL:
         scheduler.add_job(keep_awake, "interval", minutes=10, id="keep_awake", replace_existing=True)
-    # First sync right away, then every 30 min (new week, forecast revisions, restarts)
+    # First sync right away, then every 10 min: retries soon after a ForexFactory 429 on a fresh instance
     scheduler.add_job(
-        sync_and_schedule, "interval", minutes=30, id="calendar_sync", next_run_time=utcnow(), replace_existing=True
+        sync_and_schedule, "interval", minutes=10, id="calendar_sync", next_run_time=utcnow(), replace_existing=True
     )
     scheduler.start()
 
