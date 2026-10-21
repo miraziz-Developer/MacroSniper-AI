@@ -84,18 +84,21 @@ async def _load_raw() -> List[Dict[str, Any]]:
     global _memory, _fetched_at
     if _memory and time.time() - _fetched_at < CACHE_TTL_SECONDS:
         return _memory
-    try:
-        async with httpx.AsyncClient(timeout=10.0, headers={"User-Agent": "Mozilla/5.0"}) as client:
-            res = await client.get(FEED_URL)
-        if res.status_code == 200 and isinstance(res.json(), list):
-            _memory, _fetched_at = res.json(), time.time()
-            os.makedirs(settings.DATA_DIR, exist_ok=True)
-            with open(_cache_path(), "w") as f:
-                json.dump(_memory, f)
-            return _memory
-        logger.warning("ForexFactory returned HTTP %s; using cache", res.status_code)
-    except Exception as e:
-        logger.warning("ForexFactory request failed (%s); using cache", e)
+    # Cloudflare in front of ForexFactory often blocks cloud IPs; the GitHub mirror is the fallback
+    for url in (FEED_URL, settings.CALENDAR_MIRROR_URL):
+        try:
+            async with httpx.AsyncClient(timeout=10.0, headers={"User-Agent": "Mozilla/5.0"}) as client:
+                res = await client.get(url)
+            data = res.json() if res.status_code == 200 else None
+            if isinstance(data, list) and data:
+                _memory, _fetched_at = data, time.time()
+                os.makedirs(settings.DATA_DIR, exist_ok=True)
+                with open(_cache_path(), "w") as f:
+                    json.dump(_memory, f)
+                return _memory
+            logger.warning("Calendar source %s returned HTTP %s", url, res.status_code)
+        except Exception as e:
+            logger.warning("Calendar source %s failed: %s", url, e)
 
     if not _memory and os.path.exists(_cache_path()):
         try:

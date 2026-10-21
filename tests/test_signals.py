@@ -133,3 +133,31 @@ def test_fmp_actual_match_and_rescale():
     assert match_actual("CPI m/m", t, 0.2, items) == pytest.approx(0.4)
     assert match_actual("CPI m/m", t.replace(hour=14), 0.2, items) is None  # time mismatch
     assert match_actual("FOMC Member Speaks", t, None, items) is None
+
+
+async def test_calendar_falls_back_to_mirror_when_feed_is_blocked(monkeypatch):
+    from app.calendar import forexfactory as ff
+
+    feed = [{"title": "CPI m/m", "country": "USD", "date": "2026-10-21T08:30:00-04:00", "impact": "High"}]
+    calls = []
+
+    class Res:
+        def __init__(self, code, body):
+            self.status_code, self._body = code, body
+
+        def json(self):
+            return self._body
+
+    class FakeClient:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, url):
+            calls.append(url)
+            return Res(403, None) if url == ff.FEED_URL else Res(200, feed)
+
+    monkeypatch.setattr(ff, "_memory", [])
+    monkeypatch.setattr(ff.httpx, "AsyncClient", FakeClient)
+    items = await ff.fetch_week()
+    assert [i.title for i in items] == ["CPI m/m"]
+    assert calls == [ff.FEED_URL, ff.settings.CALENDAR_MIRROR_URL]
