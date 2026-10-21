@@ -99,7 +99,7 @@ class EventOrchestrator:
         self,
         event_id: int,
         session: AsyncSession,
-        current_price: float = 2650.00,
+        current_price: Optional[float] = None,
     ) -> Optional[EconomicEvent]:
         """T-1h Step: Transitions MACRO_ANALYZED -> LIQUIDITY_MAPPED"""
         event = await session.get(EconomicEvent, event_id)
@@ -123,7 +123,7 @@ class EventOrchestrator:
         await cache.set(f"event:{event.id}:liquidity_upper_ob", str(zones.upper_ob), ex=86400)
         await cache.set(f"event:{event.id}:liquidity_lower_ob", str(zones.lower_ob), ex=86400)
         await cache.set(f"event:{event.id}:atr_m15", str(zones.atr_m15), ex=86400)
-        logger.info(f"Event {event_id} transitioned to LIQUIDITY_MAPPED")
+        logger.info(f"Event {event_id} transitioned to LIQUIDITY_MAPPED at price {current_price}")
 
         # Dispatch Telegram T-1h notification
         await telegram_notifier.send_t1h_liquidity_map(
@@ -138,7 +138,7 @@ class EventOrchestrator:
         self,
         event_id: int,
         session: AsyncSession,
-        current_price: float = 2650.00,
+        current_price: Optional[float] = None,
         intermarket_score: float = 10.0,
     ) -> Optional[SniperSignal]:
         """T-2m (4:58) Step: Transitions LIQUIDITY_MAPPED -> TRAP_DEPLOYED and creates SniperSignal"""
@@ -260,12 +260,15 @@ class EventOrchestrator:
         event_id: int,
         actual_value: float,
         session: AsyncSession,
-        current_price: float = 2650.00,
+        current_price: Optional[float] = None,
     ) -> SafetyEvaluationResult:
         """
         T+1s Step (5:00:01):
         Instant 1-second actual release verification and Kill-Switch execution.
         """
+        if current_price is None:
+            current_price = await live_price_feed.get_live_gold_price()
+
         event = await session.get(EconomicEvent, event_id)
         if not event:
             raise ValueError(f"Event {event_id} not found")

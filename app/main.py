@@ -112,7 +112,7 @@ class WebhookReleasePayload(BaseModel):
     external_id: Optional[str] = None
     event_id: Optional[int] = None
     actual: float
-    current_price: Optional[float] = 2650.00
+    current_price: Optional[float] = None
 
 
 # ==========================================
@@ -160,7 +160,7 @@ async def get_event_details(event_id: int, db: AsyncSession = Depends(get_db)):
 async def trigger_event_step(
     event_id: int,
     step: str,
-    price: float = Query(2650.00, description="Current market price for simulation"),
+    price: Optional[float] = Query(None, description="Current market price for simulation (fetches live if omitted)"),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -216,7 +216,7 @@ async def webhook_actual_release(
         event_id=event.id,
         actual_value=payload.actual,
         session=db,
-        current_price=payload.current_price or 2650.00,
+        current_price=payload.current_price,
     )
 
     return {

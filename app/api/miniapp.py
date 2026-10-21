@@ -106,7 +106,7 @@ async def serve_telegram_mini_app():
         <div class="clean-card rounded-xl p-3.5 flex items-center justify-between">
             <div>
                 <div class="text-[11px] text-slate-400 font-medium">XAU/USD (OLTIN) BOZOR NARXI</div>
-                <div class="text-2xl font-black font-mono text-amber-400 mt-0.5" id="live-gold-price">$2,654.20</div>
+                <div class="text-2xl font-black font-mono text-amber-400 mt-0.5" id="live-gold-price">$4,136.50</div>
             </div>
             <div class="text-right font-mono text-xs">
                 <span class="px-2 py-1 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 text-[11px] font-semibold">
@@ -182,15 +182,15 @@ async def serve_telegram_mini_app():
                 <div class="grid grid-cols-3 gap-2 font-mono text-center text-xs my-2.5">
                     <div class="bg-slate-900 p-2 rounded border border-slate-800">
                         <div class="text-[10px] text-slate-400">KIRISH</div>
-                        <div class="font-bold text-white text-sm" id="market-entry">Hozirgi narx</div>
+                        <div class="font-bold text-white text-sm" id="market-entry">Bozor narxi</div>
                     </div>
                     <div class="bg-slate-900 p-2 rounded border border-slate-800">
                         <div class="text-[10px] text-rose-400">STOP-LOSS</div>
-                        <div class="font-bold text-rose-400 text-sm" id="market-sl">2662.70</div>
+                        <div class="font-bold text-rose-400 text-sm" id="market-sl">4145.00</div>
                     </div>
                     <div class="bg-slate-900 p-2 rounded border border-slate-800">
                         <div class="text-[10px] text-emerald-400">TAKE-PROFIT</div>
-                        <div class="font-bold text-emerald-400 text-sm" id="market-tp">2636.20</div>
+                        <div class="font-bold text-emerald-400 text-sm" id="market-tp">4118.00</div>
                     </div>
                 </div>
 
@@ -214,15 +214,15 @@ async def serve_telegram_mini_app():
                 <div class="grid grid-cols-3 gap-2 font-mono text-center text-xs my-2.5">
                     <div class="bg-slate-900 p-2 rounded border border-slate-800">
                         <div class="text-[10px] text-slate-400">KIRISH</div>
-                        <div class="font-bold text-white text-sm" id="stop-entry">2648.20</div>
+                        <div class="font-bold text-white text-sm" id="stop-entry">4130.00</div>
                     </div>
                     <div class="bg-slate-900 p-2 rounded border border-slate-800">
                         <div class="text-[10px] text-rose-400">STOP-LOSS</div>
-                        <div class="font-bold text-rose-400 text-sm" id="stop-sl">2656.50</div>
+                        <div class="font-bold text-rose-400 text-sm" id="stop-sl">4138.50</div>
                     </div>
                     <div class="bg-slate-900 p-2 rounded border border-slate-800">
                         <div class="text-[10px] text-emerald-400">TAKE-PROFIT</div>
-                        <div class="font-bold text-emerald-400 text-sm" id="stop-tp">2632.00</div>
+                        <div class="font-bold text-emerald-400 text-sm" id="stop-tp">4114.00</div>
                     </div>
                 </div>
 
@@ -516,7 +516,7 @@ async def get_miniapp_dashboard_data(db: AsyncSession = Depends(get_db)):
     try:
         live_price = await live_price_feed.get_live_gold_price()
     except Exception:
-        live_price = 2654.20
+        live_price = 4140.00
 
     # 2. Query upcoming events from database
     now = datetime.now(timezone.utc)
