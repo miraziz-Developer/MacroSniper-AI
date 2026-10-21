@@ -172,13 +172,13 @@ class TelegramNotifier:
             f"⚡ *Spred buferi kiritilgan. Soat 17:30:01 da Kill-Switch himoyasi ishga tushadi!*"
         )
 
-        # Inline button keyboard for 1-click Mini App execution
+        # Inline button keyboard for 1-click Mini App execution in VIP channel
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
                         text="📱 MacroSniper Mini App",
-                        web_app=WebAppInfo(url=settings.MINI_APP_URL),
+                        url=settings.MINI_APP_URL,
                     )
                 ]
             ]
