@@ -1,0 +1,34 @@
+# Mirrors the ForexFactory weekly calendar to the `calendar-data` branch every hour.
+# The app falls back to this copy when Cloudflare blocks Render's IP. Not on `main`, so no redeploys.
+name: Calendar mirror
+
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency: calendar-mirror
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch ForexFactory weekly calendar
+        run: |
+          curl -fsS --retry 3 --retry-delay 30 -A "Mozilla/5.0" -o ff.json \
+            https://nfs.faireconomy.media/ff_calendar_thisweek.json
+          python3 -c "import json; d = json.load(open('ff.json')); assert isinstance(d, list) and d, 'empty feed'"
+
+      - name: Publish to calendar-data branch (single commit, force-pushed)
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          mkdir out && cp ff.json out/ff_calendar_thisweek.json && cd out
+          git init -q -b calendar-data
+          git add ff_calendar_thisweek.json
+          git -c user.name="calendar-bot" -c user.email="actions@github.com" commit -qm "calendar $(date -u +%FT%TZ)"
+          git push -qf "https://x-access-token:${TOKEN}@github.com/${REPO}.git" calendar-data
