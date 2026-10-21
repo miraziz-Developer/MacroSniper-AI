@@ -102,7 +102,7 @@ class LiveSpeechAI:
                     "https://api.groq.com/openai/v1/chat/completions",
                     headers={"Authorization": f"Bearer {self.groq_key}"},
                     json={
-                        "model": "llama-3.1-70b-versatile",
+                        "model": "qwen/qwen3.8-27b",
                         "messages": [{"role": "user", "content": prompt}],
                         "response_format": {"type": "json_object"},
                         "temperature": 0.1,

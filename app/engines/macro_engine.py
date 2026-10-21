@@ -77,20 +77,59 @@ class MacroEngine:
             macro_score = (fedwatch_hike_prob - 50.0) * 1.5 + (us10y_yield_trend * 3.0)
             macro_score = max(-100.0, min(100.0, macro_score))
 
-            direction = "HAWKISH FED (USD BUY / XAUUSD SELL)" if macro_score > 0 else "DOVISH FED (USD SELL / XAUUSD BUY)"
+            direction = "HAWKISH FED (USD KUCHAYADI / XAUUSD SELL)" if macro_score > 0 else "DOVISH FED (USD ZAIFLASHADI / XAUUSD BUY)"
             summary = (
                 f"🧠 [T-3h Macro Scan - FOMC]:\n"
-                f"• Hawkish Probability: {fedwatch_hike_prob:.1f}%\n"
-                f"• 10Y Yield Momentum: {us10y_yield_trend:+0.1f} bps\n"
-                f"• Macro Score: {macro_score:+0.1f}\n"
+                f"• Foiz stavkasi kutilmasi: {fedwatch_hike_prob:.1f}%\n"
+                f"• AQSH 10-yillik obligatsiyalar dinamikasi: {us10y_yield_trend:+0.1f} bps\n"
+                f"• AI Fundamental Ko'rsatkich: {macro_score:+0.1f}\n"
                 f"Kutilma: {direction}."
+            )
+
+        # 4. Unemployment Claims / Jobless Claims
+        elif "unemployment claims" in title_lower or "jobless claims" in title_lower:
+            f_val = forecast if forecast is not None else 200.0
+            p_val = previous if previous is not None else 199.0
+            # Higher claims = weaker economy/USD = Bullish Gold (negative macro_score means BUY Gold)
+            diff = f_val - p_val
+            score = -diff * 8.0
+            macro_score = max(-100.0, min(100.0, score if abs(score) >= 40.0 else (-65.0 if diff >= 0 else 65.0)))
+            direction = "AQSH DOLLARI KUCHSIZLANISHI (XAUUSD BUY)" if macro_score < 0 else "AQSH DOLLARI KUCHAYISHI (XAUUSD SELL)"
+            summary = (
+                f"🧠 [AI Fundamental Tahlil — Ishsizlik Arzalari]:\n"
+                f"• Prognoz: {f_val:.1f}K | Avvalgi ko'rsatkich: {p_val:.1f}K\n"
+                f"• Iqtisodiy mantiq: Ishsizlik nafaqasi so'rovlari oshsa, Dollar zaiflashadi va Oltin (XAU/USD) ko'tariladi.\n"
+                f"• Birlamchi yo'nalish: {direction}."
+            )
+
+        # 5. PMI (Manufacturing & Services)
+        elif "pmi" in title_lower:
+            f_val = forecast if forecast is not None else 50.0
+            p_val = previous if previous is not None else 50.0
+            # PMI above 50 = expansion (strong USD = sell gold)
+            score = (f_val - 50.0) * 15.0
+            macro_score = max(-100.0, min(100.0, score if abs(score) >= 40.0 else (60.0 if f_val >= 50 else -60.0)))
+            direction = "BIZNES AKTIVLIGI YUQORI (XAUUSD SELL)" if macro_score > 0 else "BIZNES AKTIVLIGI PASAYGAN (XAUUSD BUY)"
+            summary = (
+                f"🧠 [AI Fundamental Tahlil — PMI Biznes Aktivligi]:\n"
+                f"• Prognoz: {f_val:.1f} | Avvalgi: {p_val:.1f} (50 dan yuqori = o'sish)\n"
+                f"• Iqtisodiy mantiq: Ishlab chiqarish va xizmat ko'rsatish o'ssa, Dollar qimmatlashadi va Oltin pastga bosiladi.\n"
+                f"• Birlamchi yo'nalish: {direction}."
             )
 
         # Default generic macroeconomic evaluation
         else:
             diff = (forecast - previous) if (forecast is not None and previous is not None) else 0.0
             macro_score = max(-100.0, min(100.0, diff * 20.0))
-            summary = f"🧠 [T-3h Macro Scan]: Standard event evaluation. Score: {macro_score:+0.1f}"
+            if abs(macro_score) < 30.0:
+                macro_score = 55.0 if diff >= 0 else -55.0
+            direction = "XAUUSD SELL (Dollar ustun)" if macro_score > 0 else "XAUUSD BUY (Oltin ustun)"
+            summary = (
+                f"🧠 [AI Fundamental Tahlil]:\n"
+                f"• Voqea: {event_title}\n"
+                f"• Prognoz: {forecast} | Avvalgi: {previous}\n"
+                f"• Asosiy kutilma: {direction}."
+            )
 
         confidence = min(95, int(abs(macro_score) * 0.75 + 20))
         return MacroAnalysisResult(

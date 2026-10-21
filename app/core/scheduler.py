@@ -17,6 +17,8 @@ async def schedule_event_pipeline(event_id: int, event_time: datetime):
     Schedules the 4-step timeline for a given event:
     T-3h, T-1h, T-2m, and T-10s (Fast Poller).
     """
+    if event_time.tzinfo is None:
+        event_time = event_time.replace(tzinfo=timezone.utc)
     now = datetime.now(timezone.utc)
     
     t_minus_3h = event_time - timedelta(hours=3)

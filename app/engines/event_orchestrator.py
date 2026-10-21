@@ -214,6 +214,10 @@ class EventOrchestrator:
                 stop_tp=signal_order.stop_tp,
                 total_score=signal_order.total_score,
                 symbol=signal_order.symbol,
+                market_action=signal_order.market_action,
+                market_entry=signal_order.market_entry,
+                market_sl=signal_order.market_sl,
+                market_tp=signal_order.market_tp,
             )
 
             await telegram_notifier.send_458_sniper_signal(
@@ -230,6 +234,10 @@ class EventOrchestrator:
                 stop_sl=signal_order.stop_sl,
                 stop_tp=signal_order.stop_tp,
                 card_image_bytes=card_bytes,
+                market_action=signal_order.market_action,
+                current_price=signal_order.market_entry or current_price,
+                market_sl=signal_order.market_sl,
+                market_tp=signal_order.market_tp,
             )
 
             # Auto-place bracket orders on MT5 Bridge

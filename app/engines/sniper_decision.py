@@ -35,6 +35,13 @@ class SniperOrder:
     recommended_lot: float
     summary: str
 
+    # Direct Market Order (1 minute before news for retail traders)
+    market_action: str = "SELL"
+    market_entry: float = 0.0
+    market_sl: float = 0.0
+    market_tp: float = 0.0
+    market_instruction_uz: str = ""
+
 
 class SniperDecisionEngine:
     """
@@ -131,9 +138,20 @@ class SniperDecisionEngine:
             sl_dist = abs(trap_entry - trap_sl)
             risk_calc = risk_manager.calculate_lot_size(symbol, account_balance, risk_pct, sl_dist)
 
+            # Direct Market Order calculation (1 min before news execution)
+            m_entry = round(current_price, precision)
+            m_sl = round(current_price + (atr_m15 * 1.8) + buffer, precision)
+            m_tp = round(current_price - (atr_m15 * 3.5), precision)
+            m_instruction = (
+                f"⚡ ASOSIY BUYRUQ: Yangilikdan 1 daqiqa oldin bozor narxidan SELL bosing.\n"
+                f"• Kirish narxi: {m_entry} | Stop-Loss: {m_sl} | Take-Profit: {m_tp}\n"
+                f"• Qoida: 70-100 pips foydada 50% ni yopib, Stop-Lossni kirishga (Bezubytok) o'tkazing!"
+            )
+
             summary = (
                 f"🎯 [4:58 PRE-SNIPER SIGNAL — {symbol}]:\n"
                 f"• Direction: BEARISH (SELL) | Confidence: {confidence}%\n"
+                f"• Market Order (1 daqiqa oldin): SELL @ {m_entry} (SL: {m_sl} | TP: {m_tp})\n"
                 f"• Judas Swing Trap: SELL LIMIT @ {trap_entry} (SL: {trap_sl} | TP: {trap_tp})\n"
                 f"  - TP1 (Scale 50% & Breakeven): {trap_tp1}\n"
                 f"  - TP2 (Scale 30%): {trap_tp2}\n"
@@ -162,6 +180,11 @@ class SniperDecisionEngine:
                 stop_tp=break_tp,
                 recommended_lot=risk_calc.calculated_lot,
                 summary=summary,
+                market_action="SELL",
+                market_entry=m_entry,
+                market_sl=m_sl,
+                market_tp=m_tp,
+                market_instruction_uz=m_instruction,
             )
 
         else:
@@ -184,9 +207,20 @@ class SniperDecisionEngine:
             sl_dist = abs(trap_entry - trap_sl)
             risk_calc = risk_manager.calculate_lot_size(symbol, account_balance, risk_pct, sl_dist)
 
+            # Direct Market Order calculation (1 min before news execution)
+            m_entry = round(current_price, precision)
+            m_sl = round(current_price - (atr_m15 * 1.8) - buffer, precision)
+            m_tp = round(current_price + (atr_m15 * 3.5), precision)
+            m_instruction = (
+                f"⚡ ASOSIY BUYRUQ: Yangilikdan 1 daqiqa oldin bozor narxidan BUY bosing.\n"
+                f"• Kirish narxi: {m_entry} | Stop-Loss: {m_sl} | Take-Profit: {m_tp}\n"
+                f"• Qoida: 70-100 pips foydada 50% ni yopib, Stop-Lossni kirishga (Bezubytok) o'tkazing!"
+            )
+
             summary = (
                 f"🎯 [4:58 PRE-SNIPER SIGNAL — {symbol}]:\n"
                 f"• Direction: BULLISH (BUY) | Confidence: {confidence}%\n"
+                f"• Market Order (1 daqiqa oldin): BUY @ {m_entry} (SL: {m_sl} | TP: {m_tp})\n"
                 f"• Judas Swing Trap: BUY LIMIT @ {trap_entry} (SL: {trap_sl} | TP: {trap_tp})\n"
                 f"  - TP1 (Scale 50% & Breakeven): {trap_tp1}\n"
                 f"  - TP2 (Scale 30%): {trap_tp2}\n"
@@ -215,6 +249,11 @@ class SniperDecisionEngine:
                 stop_tp=break_tp,
                 recommended_lot=risk_calc.calculated_lot,
                 summary=summary,
+                market_action="BUY",
+                market_entry=m_entry,
+                market_sl=m_sl,
+                market_tp=m_tp,
+                market_instruction_uz=m_instruction,
             )
 
 

@@ -72,15 +72,25 @@ class CardRenderer:
         stop_tp: float,
         total_score: float,
         symbol: str = "XAUUSD (GOLD)",
+        market_action: Optional[str] = None,
+        market_entry: Optional[float] = None,
+        market_sl: Optional[float] = None,
+        market_tp: Optional[float] = None,
     ) -> io.BytesIO:
         """
-        Creates the 4:58 Pre-Sniper Telegram VIP infographic card.
+        Creates the professional Uzbek Pre-Sniper Telegram VIP infographic card.
+        Ultra-clean, serious, institutional design for real traders.
         """
         img = Image.new("RGB", (self.WIDTH, self.HEIGHT), color=self.BG_COLOR)
         draw = ImageDraw.Draw(img)
 
         is_bullish = "BULLISH" in bias or "BUY" in bias
         theme_color = self.ACCENT_GREEN if is_bullish else self.ACCENT_RED
+        action_text = "SOTIB OLISH (BUY)" if is_bullish else "SOTISH (SELL)"
+        m_action = market_action or ("BUY" if is_bullish else "SELL")
+        m_entry = market_entry or current_price
+        m_sl = market_sl or limit_sl
+        m_tp = market_tp or limit_tp
 
         # 1. Subtle Background Gradients & Glow accents
         draw.rectangle([(20, 20), (self.WIDTH - 20, self.HEIGHT - 20)], fill=self.CARD_BG, outline=self.CARD_BORDER, width=2)
@@ -94,16 +104,16 @@ class CardRenderer:
         font_badge = self._get_font(18, bold=True)
 
         draw.text((50, 48), "MACRO SNIPER AI", font=font_title, fill=self.ACCENT_CYAN)
-        draw.text((50, 92), f"HIGH-IMPACT NEWS EXECUTION • {symbol}", font=font_sub, fill=self.TEXT_MUTED)
+        draw.text((50, 92), f"INSTITUTSIONAL MAKRO TAHLIL • {symbol}", font=font_sub, fill=self.TEXT_MUTED)
 
         # Event Badge (Right)
-        badge_text = "TIER-1 RED FOLDER"
-        draw.rounded_rectangle([(self.WIDTH - 260, 48), (self.WIDTH - 50, 92)], radius=8, fill=self.BADGE_BG, outline=self.ACCENT_RED, width=1)
-        draw.text((self.WIDTH - 240, 58), badge_text, font=font_badge, fill=self.ACCENT_RED)
+        badge_text = "TIER-1 YUQORI VOLATILLIK"
+        draw.rounded_rectangle([(self.WIDTH - 300, 48), (self.WIDTH - 50, 92)], radius=8, fill=self.BADGE_BG, outline=self.ACCENT_RED, width=1)
+        draw.text((self.WIDTH - 280, 58), badge_text, font=font_badge, fill=self.ACCENT_RED)
 
         # Event Headline
         font_event = self._get_font(26, bold=True)
-        draw.text((50, 135), f"EVENT: {event_title.upper()}", font=font_event, fill=self.TEXT_WHITE)
+        draw.text((50, 135), f"VOQEA: {event_title.upper()}", font=font_event, fill=self.TEXT_WHITE)
 
         # Divider line
         draw.line([(50, 180), (self.WIDTH - 50, 180)], fill=self.CARD_BORDER, width=1)
@@ -112,47 +122,47 @@ class CardRenderer:
         # Bias Box
         draw.rounded_rectangle([(50, 205), (420, 310)], radius=12, fill=(26, 35, 60), outline=theme_color, width=2)
         font_label = self._get_font(16, bold=True)
-        font_bias = self._get_font(28, bold=True)
-        draw.text((70, 220), "AI MACRO PREDICTION", font=font_label, fill=self.TEXT_MUTED)
-        draw.text((70, 250), bias, font=font_bias, fill=theme_color)
+        font_bias = self._get_font(26, bold=True)
+        draw.text((70, 220), "ASOSIY KUTILMA (AI)", font=font_label, fill=self.TEXT_MUTED)
+        draw.text((70, 252), action_text, font=font_bias, fill=theme_color)
 
         # Confidence & Score Box
         draw.rounded_rectangle([(440, 205), (780, 310)], radius=12, fill=(26, 35, 60), outline=self.CARD_BORDER, width=1)
-        draw.text((460, 220), "CONFIDENCE & SCORE", font=font_label, fill=self.TEXT_MUTED)
-        draw.text((460, 250), f"{confidence}%", font=font_bias, fill=self.TEXT_WHITE)
-        draw.text((560, 255), f"S_total: {total_score:+0.1f}", font=self._get_font(22, bold=True), fill=self.ACCENT_CYAN)
+        draw.text((460, 220), "ISHONCH DARAJASI", font=font_label, fill=self.TEXT_MUTED)
+        draw.text((460, 252), f"{confidence}%", font=font_bias, fill=self.TEXT_WHITE)
+        draw.text((560, 257), f"AI Ball: {total_score:+0.1f}", font=self._get_font(20, bold=True), fill=self.ACCENT_CYAN)
 
         # Current Price Box
         draw.rounded_rectangle([(800, 205), (self.WIDTH - 50, 310)], radius=12, fill=(26, 35, 60), outline=self.CARD_BORDER, width=1)
-        draw.text((820, 220), "T-2M REFERENCE PRICE", font=font_label, fill=self.TEXT_MUTED)
-        draw.text((820, 250), f"{current_price:.2f}", font=font_bias, fill=self.ACCENT_GOLD)
+        draw.text((820, 220), "JORIY BOZOR NARXI", font=font_label, fill=self.TEXT_MUTED)
+        draw.text((820, 252), f"${current_price:.2f}", font=font_bias, fill=self.ACCENT_GOLD)
 
-        # 4. ORDER MATRICES: 1) Judas Swing Limit Trap, 2) Momentum Breakout
-        # Matrix 1: Judas Swing Limit Trap (The Secret Sauce)
+        # 4. ORDER MATRICES: 1) Bozor buyrug'i (1 daqiqa oldin), 2) Kutilayotgan Stop Order
+        # Matrix 1: Bozor narxida kirish (Asosiy tezkor harakat)
         draw.rounded_rectangle([(50, 335), (580, 580)], radius=14, fill=(22, 31, 55), outline=self.ACCENT_GOLD, width=2)
-        draw.text((70, 355), "🎯 ORDER 1: JUDAS SWING TRAP (LIMIT)", font=self._get_font(20, bold=True), fill=self.ACCENT_GOLD)
-        draw.text((70, 385), "Catches the initial market-maker fake spike liquidity sweep", font=self._get_font(14), fill=self.TEXT_MUTED)
+        draw.text((70, 355), "⚡ 1-BUYRUQ: BOZOR NARXIDA (1 MIN OLDIN)", font=self._get_font(19, bold=True), fill=self.ACCENT_GOLD)
+        draw.text((70, 385), "Yangilikdan 1 daqiqa oldin to'g'ridan-to'g'ri ochiladi", font=self._get_font(14), fill=self.TEXT_MUTED)
 
-        font_order_type = self._get_font(24, bold=True)
-        draw.text((70, 425), f"TYPE: {limit_type}", font=font_order_type, fill=theme_color)
-        draw.text((70, 465), f"ENTRY:  {limit_entry:.2f}", font=font_order_type, fill=self.TEXT_WHITE)
-        draw.text((70, 505), f"STOP-LOSS:   {limit_sl:.2f}", font=font_order_type, fill=self.ACCENT_RED)
-        draw.text((70, 540), f"TAKE-PROFIT: {limit_tp:.2f}  (+1200 pts)", font=font_order_type, fill=self.ACCENT_GREEN)
+        font_order_type = self._get_font(22, bold=True)
+        draw.text((70, 425), f"BUYRUQ:  MARKET {m_action}", font=font_order_type, fill=theme_color)
+        draw.text((70, 465), f"KIRISH:   {m_entry:.2f}", font=font_order_type, fill=self.TEXT_WHITE)
+        draw.text((70, 505), f"STOP-LOSS:    {m_sl:.2f}", font=font_order_type, fill=self.ACCENT_RED)
+        draw.text((70, 540), f"TAKE-PROFIT:  {m_tp:.2f}  (+180 pips)", font=font_order_type, fill=self.ACCENT_GREEN)
 
         # Matrix 2: Momentum Breakout Stop Order
         draw.rounded_rectangle([(620, 335), (self.WIDTH - 50, 580)], radius=14, fill=(22, 31, 55), outline=self.CARD_BORDER, width=1)
-        draw.text((640, 355), "⚡ ORDER 2: MOMENTUM BREAKOUT (STOP)", font=self._get_font(20, bold=True), fill=self.ACCENT_CYAN)
-        draw.text((640, 385), "Executes if price explodes immediately without fake-out", font=self._get_font(14), fill=self.TEXT_MUTED)
+        draw.text((640, 355), "🎯 2-BUYRUQ: KUTILAYOTGAN (STOP ORDER)", font=self._get_font(19, bold=True), fill=self.ACCENT_CYAN)
+        draw.text((640, 385), "Narx birdaniga kuchli yo'nalishga uchib ketsa iladi", font=self._get_font(14), fill=self.TEXT_MUTED)
 
-        draw.text((640, 425), f"TYPE: {stop_type}", font=font_order_type, fill=theme_color)
-        draw.text((640, 465), f"ENTRY:  {stop_entry:.2f}", font=font_order_type, fill=self.TEXT_WHITE)
-        draw.text((640, 505), f"STOP-LOSS:   {stop_sl:.2f}", font=font_order_type, fill=self.ACCENT_RED)
-        draw.text((640, 540), f"TAKE-PROFIT: {stop_tp:.2f}  (+1000 pts)", font=font_order_type, fill=self.ACCENT_GREEN)
+        draw.text((640, 425), f"BUYRUQ:  {stop_type}", font=font_order_type, fill=theme_color)
+        draw.text((640, 465), f"KIRISH:   {stop_entry:.2f}", font=font_order_type, fill=self.TEXT_WHITE)
+        draw.text((640, 505), f"STOP-LOSS:    {stop_sl:.2f}", font=font_order_type, fill=self.ACCENT_RED)
+        draw.text((640, 540), f"TAKE-PROFIT:  {stop_tp:.2f}  (+120 pips)", font=font_order_type, fill=self.ACCENT_GREEN)
 
         # 5. Footer Security & Latency Guarantee
         draw.line([(50, 610), (self.WIDTH - 50, 610)], fill=self.CARD_BORDER, width=1)
-        draw.text((50, 630), "⚡ Ultra-Fast 5:00:01 Kill-Switch Guard Active • MT5 Bridge Connected", font=font_sub, fill=self.ACCENT_CYAN)
-        draw.text((self.WIDTH - 300, 630), "Aether MacroSniper SaaS", font=font_sub, fill=self.TEXT_MUTED)
+        draw.text((50, 630), "💡 Maslahat: 70-100 pips foydada Stop-Lossni kirish narxiga suring (Bezubytok)!", font=font_sub, fill=self.ACCENT_CYAN)
+        draw.text((self.WIDTH - 250, 630), "MacroSniper AI Pro", font=font_sub, fill=self.TEXT_MUTED)
 
         output = io.BytesIO()
         img.save(output, format="PNG")

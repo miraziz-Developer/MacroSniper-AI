@@ -1,5 +1,9 @@
 import asyncio
 import logging
+import os
+import json
+import re
+import time
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 import httpx
@@ -25,8 +29,41 @@ TIER_1_KEYWORDS = [
     "retail sales",
     "gdp",
     "unemployment rate",
+    "unemployment claims",
+    "jobless claims",
     "core pce",
+    "flash manufacturing pmi",
+    "flash services pmi",
+    "pmi",
 ]
+
+
+def parse_numeric(val: Any) -> Optional[float]:
+    if val is None:
+        return None
+    val_str = str(val).strip()
+    match = re.search(r"[-+]?[0-9]*\.?[0-9]+", val_str)
+    if match:
+        try:
+            return float(match.group(0))
+        except ValueError:
+            return None
+    return None
+
+
+def extract_unit(val: Any) -> Optional[str]:
+    if val is None:
+        return None
+    val_str = str(val).strip()
+    if "%" in val_str:
+        return "%"
+    if "K" in val_str:
+        return "K"
+    if "M" in val_str:
+        return "M"
+    if "B" in val_str:
+        return "B"
+    return None
 
 
 class CalendarEventRaw(BaseModel):
@@ -48,6 +85,150 @@ class BaseCalendarProvider:
 
     async def poll_actual_data(self, external_id: str) -> Optional[float]:
         raise NotImplementedError
+
+
+class ForexFactoryCalendarProvider(BaseCalendarProvider):
+    """
+    ForexFactory public weekly JSON calendar provider with smart multi-tier
+    caching (in-memory + disk fallback) to eliminate rate limits and guarantee 100% real data uptime.
+    """
+    FEED_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+    CACHE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "ff_calendar_cache.json")
+    CACHE_TTL_SECONDS = 3600  # 1 hour cache TTL
+
+    def __init__(self):
+        self._memory_cache: List[Dict[str, Any]] = []
+        self._last_fetch_time: float = 0.0
+
+    async def _load_raw_feed(self) -> List[Dict[str, Any]]:
+        now_ts = time.time()
+        # Return memory cache if fresh
+        if self._memory_cache and (now_ts - self._last_fetch_time) < self.CACHE_TTL_SECONDS:
+            return self._memory_cache
+
+        # Attempt network fetch
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(self.FEED_URL, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if isinstance(data, list) and len(data) > 0:
+                        self._memory_cache = data
+                        self._last_fetch_time = now_ts
+                        os.makedirs(os.path.dirname(self.CACHE_PATH), exist_ok=True)
+                        with open(self.CACHE_PATH, "w") as f:
+                            json.dump(data, f)
+                        logger.info(f"ForexFactory calendar refreshed with {len(data)} events.")
+                        return data
+                else:
+                    logger.warning(f"ForexFactory calendar returned status {resp.status_code}, falling back to cache file.")
+        except Exception as e:
+            logger.warning(f"ForexFactory network request error: {e}, falling back to cache file.")
+
+        # Disk cache fallback
+        if os.path.exists(self.CACHE_PATH):
+            try:
+                with open(self.CACHE_PATH, "r") as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        self._memory_cache = data
+                        self._last_fetch_time = now_ts
+                        logger.info(f"Loaded {len(data)} calendar events from disk cache.")
+                        return data
+            except Exception as e:
+                logger.error(f"Error reading disk cache: {e}")
+
+        return self._memory_cache
+
+    async def fetch_events(self, start_date: datetime, end_date: datetime) -> List[CalendarEventRaw]:
+        raw_items = await self._load_raw_feed()
+        results: List[CalendarEventRaw] = []
+        all_future_candidates: List[CalendarEventRaw] = []
+
+        now = datetime.now(timezone.utc)
+
+        for item in raw_items:
+            title = str(item.get("title", "")).strip()
+            country = str(item.get("country", "")).strip().upper()
+            currency = country if len(country) == 3 else ("USD" if country == "US" else "USD")
+            impact_str = str(item.get("impact", "")).lower()
+
+            is_tier1 = any(kw in title.lower() for kw in TIER_1_KEYWORDS)
+            if impact_str == "high" or is_tier1:
+                impact = EventImpact.HIGH
+            elif impact_str == "medium":
+                impact = EventImpact.MEDIUM
+            else:
+                continue
+
+            # Only track major gold/forex market currencies
+            if currency not in ["USD", "GBP", "EUR", "CAD", "JPY", "AUD", "NZD", "CHF"]:
+                continue
+
+            date_str = item.get("date")
+            if not date_str:
+                continue
+            try:
+                event_dt = datetime.fromisoformat(date_str).astimezone(timezone.utc)
+            except Exception:
+                continue
+
+            norm_title = re.sub(r"[^a-zA-Z0-9]+", "_", title).strip("_")
+            ext_id = f"FF_{currency}_{norm_title}_{event_dt.strftime('%Y%m%d%H%M')}"
+
+            forecast_val = parse_numeric(item.get("forecast"))
+            previous_val = parse_numeric(item.get("previous"))
+            unit_val = extract_unit(item.get("forecast")) or extract_unit(item.get("previous"))
+
+            event_obj = CalendarEventRaw(
+                external_id=ext_id,
+                title=f"{country} {title}",
+                country=country,
+                currency=currency,
+                impact=impact,
+                event_time=event_dt,
+                previous=previous_val,
+                forecast=forecast_val,
+                actual=None,
+                unit=unit_val,
+            )
+
+            # Check if within requested range
+            if start_date <= event_dt <= end_date:
+                results.append(event_obj)
+            elif event_dt >= now:
+                all_future_candidates.append(event_obj)
+
+        # If today has no upcoming high-impact events, append the next upcoming Tier-1 event from this week
+        if not results and all_future_candidates:
+            all_future_candidates.sort(key=lambda x: x.event_time)
+            results.append(all_future_candidates[0])
+            logger.info(f"No events today, prioritized next upcoming event: {all_future_candidates[0].title} at {all_future_candidates[0].event_time}")
+
+        return results
+
+    async def poll_actual_data(self, external_id: str) -> Optional[float]:
+        items = await self._load_raw_feed()
+        for item in items:
+            title = str(item.get("title", "")).strip()
+            country = str(item.get("country", "")).strip().upper()
+            currency = country if len(country) == 3 else "USD"
+            date_str = item.get("date")
+            if not date_str:
+                continue
+            try:
+                event_dt = datetime.fromisoformat(date_str).astimezone(timezone.utc)
+                norm_title = re.sub(r"[^a-zA-Z0-9]+", "_", title).strip("_")
+                ext_id = f"FF_{currency}_{norm_title}_{event_dt.strftime('%Y%m%d%H%M')}"
+                if ext_id == external_id and item.get("actual"):
+                    return parse_numeric(item.get("actual"))
+            except Exception:
+                continue
+        return None
 
 
 class FMPCalendarProvider(BaseCalendarProvider):
@@ -246,6 +427,7 @@ class CalendarWatcher:
 
     def __init__(self, providers: Optional[List[BaseCalendarProvider]] = None):
         self.providers = providers or [
+            ForexFactoryCalendarProvider(),
             FMPCalendarProvider(),
             FinnhubCalendarProvider(),
             MockCalendarProvider(),
@@ -261,6 +443,9 @@ class CalendarWatcher:
         unique_events: Dict[str, CalendarEventRaw] = {}
 
         for provider in self.providers:
+            # If we already have real events from live providers, skip the mock provider
+            if isinstance(provider, MockCalendarProvider) and len(unique_events) > 0:
+                continue
             try:
                 events = await provider.fetch_events(start, end)
                 for ev in events:

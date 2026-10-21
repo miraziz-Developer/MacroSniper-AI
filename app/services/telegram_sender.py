@@ -150,26 +150,46 @@ class TelegramNotifier:
         stop_tp: float,
         card_image_bytes: Optional[io.BytesIO] = None,
         channel_id: Optional[str] = None,
+        market_action: Optional[str] = None,
+        current_price: Optional[float] = None,
+        market_sl: Optional[float] = None,
+        market_tp: Optional[float] = None,
     ) -> bool:
         """
         17:28 (4:58) Pre-Sniper Telegram VIP Signal with Dark-Mode Infographic Card.
+        Clear, institutional, and practical guidance for real traders.
         """
         target_channel = channel_id or settings.TELEGRAM_VIP_CHANNEL_ID
+        is_bullish = "BULLISH" in bias or "BUY" in bias
+        action_name = "🟢 BUY (SOTIB OLISH)" if is_bullish else "🔴 SELL (SOTISH)"
+        m_action = market_action or ("BUY" if is_bullish else "SELL")
+        c_price = current_price or limit_price
+        m_sl = market_sl or limit_sl
+        m_tp = market_tp or limit_tp
+        clean_stop_type = stop_type.replace('_', ' ')
+        clean_limit_type = limit_type.replace('_', ' ')
+
         caption = (
-            f"🎯 **[4:58 PRE-SNIPER SIGNAL] — {symbol}**\n\n"
+            f"🎯 **[T-2 DAQIQA OLDIN] SNIPER SIGNAL — {symbol}**\n\n"
             f"📊 **Voqea:** {event_title}\n"
-            f"🧭 **Asosiy Kutilma:** `{bias}` (Ishonch: **{confidence}%**)\n\n"
+            f"🧭 **Asosiy Kutilma:** {action_name} (Ishonch: **{confidence}%**)\n"
+            f"📍 **Joriy Bozor Narxi:** `${c_price:.2f}`\n\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"1️⃣ **JUDAS SWING TRAP (LIMIT ORDER):**\n"
-            f"• Buyruq: **{limit_type}** @ `{limit_price:.2f}`\n"
-            f"• Stop-Loss: `{limit_sl:.2f}`\n"
-            f"• Take-Profit: `{limit_tp:.2f}` *(+1200 pips)*\n\n"
-            f"2️⃣ **MOMENTUM BREAKOUT (STOP ORDER):**\n"
-            f"• Buyruq: **{stop_type}** @ `{stop_price:.2f}`\n"
+            f"1️⃣ ⚡ **ASOSIY BUYRUQ: BOZOR NARXIDA (1 MIN OLDIN):**\n"
+            f"• Buyruq turi: **MARKET {m_action}**\n"
+            f"• Qachon bosiladi: Yangilikdan 1 daqiqa oldin (17:29 da)\n"
+            f"• Kirish narxi: `{c_price:.2f}`\n"
+            f"• Stop-Loss (Zarar): `{m_sl:.2f}`\n"
+            f"• Take-Profit (Foyda): `{m_tp:.2f}` *(+180 pips)*\n\n"
+            f"2️⃣ 🎯 **KUTILAYOTGAN BUYRUQ (XAVFSIZ STOP ORDER):**\n"
+            f"• Buyruq turi: **{clean_stop_type}** @ `{stop_price:.2f}`\n"
             f"• Stop-Loss: `{stop_sl:.2f}`\n"
-            f"• Take-Profit: `{stop_tp:.2f}` *(+1000 pips)*\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"⚡ *Spred buferi kiritilgan. Soat 17:30:01 da Kill-Switch himoyasi ishga tushadi!*"
+            f"• Take-Profit: `{stop_tp:.2f}` *(+120 pips)*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"💡 **TREYDERLAR UCHUN AMALIY MASLAHAT:**\n"
+            f"Yangilik chiqib narx 70-100 pips foydaga uchgan zahoti pozitsiyaning 50% ini yoping, "
+            f"qolganiga esa Stop-Lossni ochilgan narxga (Bezubytok) o'tkazing!\n"
+            f"⚡ *17:30 da yangilik chiqqan soniyada FAKT xabari beriladi.*"
         )
 
         # Inline button keyboard for 1-click Mini App execution in VIP channel
