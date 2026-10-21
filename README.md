@@ -41,8 +41,8 @@ pytest -q
    Render'dagi SQLite har restartda o'chadi — obunalar yo'qolmasligi uchun Postgres shart.
 2. Render → Blueprint → shu repo (`render.yaml`). Environment'da to'ldiring:
    `DATABASE_URL` (Neon), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ADMIN_IDS`, ixtiyoriy `TELEGRAM_CHANNEL_ID`, `FMP_API_KEY`.
-3. **UptimeRobot** (bepul): `https://<servis>.onrender.com/health` ni har 5 daqiqada tekshiradigan monitor qo'shing.
-   Aks holda Render bepul serveri 15 daqiqada uxlaydi va rejalar o'z vaqtida chiqmaydi.
+3. Uyg'oq turish avtomatik: Render `RENDER_EXTERNAL_URL` ni o'zi beradi va server har 10 daqiqada
+   o'zining `/health` manzilini chaqiradi (bepul server 15 daqiqada uxlaydi). Qo'shimcha xizmat kerak emas.
 4. @BotFather → Bot Settings → Menu Button / Mini App URL: `https://<servis>.onrender.com/miniapp`.
 5. Kanal ishlatsangiz, botni kanalga admin qiling.
 

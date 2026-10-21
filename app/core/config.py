@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     TELEGRAM_ADMIN_IDS: str = ""
     MINI_APP_URL: str = "https://macrosniper-ai.onrender.com/miniapp"
 
+    # Set automatically by Render; enables the keep-awake self-ping (free instances sleep after 15 min)
+    RENDER_EXTERNAL_URL: Optional[str] = None
+
     # Admin HTTP API (X-Admin-Token); unset = admin endpoints disabled
     ADMIN_API_TOKEN: Optional[str] = None
 

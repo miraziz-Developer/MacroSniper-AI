@@ -149,3 +149,19 @@ def test_stage_times():
     assert set(after) == {"poll"}
     assert scheduler.stage_times(t, EventState.PLAN_SENT, t + timedelta(hours=1)) == {}
     assert "context" not in scheduler.stage_times(t, EventState.SCHEDULED, t - timedelta(minutes=1))
+
+
+async def test_keep_awake_pings_public_health(monkeypatch):
+    calls = []
+
+    class FakeClient:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, url):
+            calls.append(url)
+
+    monkeypatch.setattr(scheduler.settings, "RENDER_EXTERNAL_URL", "https://x.onrender.com/")
+    monkeypatch.setattr(scheduler.httpx, "AsyncClient", FakeClient)
+    await scheduler.keep_awake()
+    assert calls == ["https://x.onrender.com/health"]

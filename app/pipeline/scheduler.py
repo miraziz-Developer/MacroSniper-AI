@@ -2,8 +2,10 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, Optional
 
+import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from app.core.config import settings
 from app.models import EventState, utcnow
 from app.pipeline import orchestrator
 
@@ -54,9 +56,20 @@ async def sync_and_schedule() -> int:
     return len(refs)
 
 
+async def keep_awake() -> None:
+    # Inbound request through Render's public URL resets the free-tier idle timer
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.get(f"{settings.RENDER_EXTERNAL_URL.rstrip('/')}/health")
+    except Exception as e:
+        logger.warning("Keep-awake ping failed: %s", e)
+
+
 def start() -> None:
     if scheduler.running:
         return
+    if settings.RENDER_EXTERNAL_URL:
+        scheduler.add_job(keep_awake, "interval", minutes=10, id="keep_awake", replace_existing=True)
     # First sync right away, then every 30 min (new week, forecast revisions, restarts)
     scheduler.add_job(
         sync_and_schedule, "interval", minutes=30, id="calendar_sync", next_run_time=utcnow(), replace_existing=True
