@@ -1,100 +1,94 @@
+from datetime import timedelta
+
 import pytest
-from httpx import AsyncClient, ASGITransport
-from app.main import app
+from httpx import ASGITransport, AsyncClient
+
+from app.billing.subscriptions import extend_vip, get_or_create_user
 from app.core.config import settings
-from app.core.database import init_db
+from app.core.db import SessionLocal
+from app.main import app
+from app.miniapp import routes
+from app.models import Event, EventState, Plan, utcnow
+from tests.test_core import TOKEN, signed_init_data
 
 ADMIN = {"X-Admin-Token": "test-admin-token"}
 
 
-@pytest.fixture(autouse=True)
-async def setup_db(monkeypatch):
-    monkeypatch.setattr(settings, "ADMIN_API_TOKEN", "test-admin-token")
-    await init_db()
+@pytest.fixture
+async def client(monkeypatch):
+    monkeypatch.setattr(settings, "TELEGRAM_BOT_TOKEN", TOKEN)
 
+    async def gold_price():
+        return 4140.0, "test"
 
-@pytest.mark.asyncio
-async def test_health_endpoint():
+    monkeypatch.setattr(routes.market, "gold_price", gold_price)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        response = await ac.get("/health")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "healthy"
-        assert data["app"] == "MacroSniper AI"
+        yield ac
 
 
-@pytest.mark.asyncio
-async def test_events_and_signals_api():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        # 1. Sync events
-        sync_res = await ac.post("/api/events/sync", headers=ADMIN)
-        assert sync_res.status_code == 200
-        assert sync_res.json()["count"] >= 1
-
-        # 2. Get today's events
-        events_res = await ac.get("/api/events/today")
-        assert events_res.status_code == 200
-        events = events_res.json()
-        assert len(events) >= 1
-        event_id = events[0]["id"]
-
-        # 3. Trigger T-3h step
-        t3h_res = await ac.post(f"/api/events/{event_id}/trigger/t3h", headers=ADMIN)
-        assert t3h_res.status_code == 200
-        assert t3h_res.json()["state"] == "MACRO_ANALYZED"
-
-        # 4. Trigger T-1h step
-        t1h_res = await ac.post(f"/api/events/{event_id}/trigger/t1h?price=2650.00", headers=ADMIN)
-        assert t1h_res.status_code == 200
-        assert t1h_res.json()["state"] == "LIQUIDITY_MAPPED"
-
-        # 5. Trigger T-2m step
-        t2m_res = await ac.post(f"/api/events/{event_id}/trigger/t2m?price=2650.00", headers=ADMIN)
-        assert t2m_res.status_code == 200
-
-        # 6. Test ultra-fast webhook release
-        webhook_res = await ac.post(
-            "/api/webhook/actual-release",
-            headers=ADMIN,
-            json={
-                "event_id": event_id,
-                "actual": 3.6,
-                "current_price": 2650.00,
-            },
-        )
-        assert webhook_res.status_code == 200
-        webhook_data = webhook_res.json()
-        assert webhook_data["status"] == "executed"
-        assert "is_confirmed" in webhook_data
-
-        # 7. Check latest signals
-        signals_res = await ac.get("/api/signals/latest")
-        assert signals_res.status_code == 200
-
-        # 8. Check Mini App HTML and Dashboard endpoints
-        miniapp_html = await ac.get("/miniapp")
-        assert miniapp_html.status_code == 200
-        assert "MACRO SNIPER" in miniapp_html.text
-
-        dashboard_res = await ac.get("/api/miniapp/dashboard")
-        assert dashboard_res.status_code == 200
-        dash_data = dashboard_res.json()
-        assert dash_data["status"] == "online"
-        assert "active_event" in dash_data
-        assert "latest_signal" in dash_data
+async def _event_with_plan() -> int:
+    async with SessionLocal() as s:
+        ev = Event(external_id="e1", title="CPI m/m", event_time=utcnow() + timedelta(minutes=1), state=EventState.PLAN_SENT)
+        s.add(ev)
+        await s.flush()
+        s.add(Plan(event_id=ev.id, price=4140, atr=4, range_high=4145, range_low=4134, buy_entry=4145.5, buy_sl=4139.5,
+                   buy_tp1=4151.5, buy_tp2=4157.5, sell_entry=4133.5, sell_sl=4139.5, sell_tp1=4127.5, sell_tp2=4121.5,
+                   primary=None, price_source="test"))
+        await s.commit()
+        return ev.id
 
 
-@pytest.mark.asyncio
-async def test_admin_endpoints_reject_missing_or_wrong_token():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        assert (await ac.post("/api/events/sync")).status_code == 403
-        assert (await ac.post("/api/events/sync", headers={"X-Admin-Token": "nope"})).status_code == 403
-        bad = await ac.post("/api/webhook/actual-release", json={"event_id": 1, "actual": 1.0})
-        assert bad.status_code == 403
+async def test_health(client):
+    res = await client.get("/health")
+    assert res.status_code == 200 and res.json()["database"] is True
 
 
-@pytest.mark.asyncio
-async def test_trigger_unknown_event_returns_404():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        res = await ac.post("/api/events/999999/trigger/t3h", headers=ADMIN)
-        assert res.status_code == 404
+async def test_miniapp_page(client):
+    res = await client.get("/miniapp")
+    assert res.status_code == 200 and "MacroSniper" in res.text
+
+
+async def test_plan_hidden_from_guests_and_free_users(client):
+    await _event_with_plan()
+    guest = (await client.get("/api/app/state")).json()
+    assert guest["plan"] is None and guest["plan_exists"] and not guest["user"]["verified"]
+    assert guest["focus"]["title"] == "CPI m/m" and guest["focus"]["event_time"].endswith("+00:00")
+
+    free = (await client.get("/api/app/state", headers={"X-Telegram-Init-Data": signed_init_data(42)})).json()
+    assert free["user"]["verified"] and not free["user"]["is_vip"] and free["plan"] is None
+
+
+async def test_plan_visible_to_vip(client):
+    await _event_with_plan()
+    async with SessionLocal() as s:
+        await extend_vip(s, await get_or_create_user(s, 42), 30)
+    vip = (await client.get("/api/app/state", headers={"X-Telegram-Init-Data": signed_init_data(42)})).json()
+    assert vip["user"]["is_vip"] and vip["plan"]["buy"]["entry"] == 4145.5
+
+
+async def test_forged_init_data_is_rejected(client):
+    forged = signed_init_data(42, token="999:attacker")
+    res = (await client.get("/api/app/state", headers={"X-Telegram-Init-Data": forged})).json()
+    assert not res["user"]["verified"]
+    assert (await client.post("/api/app/invoice", headers={"X-Telegram-Init-Data": forged})).status_code == 401
+
+
+async def test_admin_endpoints_require_token(client):
+    assert (await client.post("/api/admin/sync")).status_code == 403
+    assert (await client.post("/api/admin/sync", headers={"X-Admin-Token": "nope"})).status_code == 403
+    assert (await client.post("/api/admin/events/1/actual", json={"value": 1})).status_code == 403
+
+
+async def test_admin_actual_resolves_once(client, monkeypatch):
+    from app.pipeline import orchestrator
+
+    async def noop(*a, **k):
+        return 0
+
+    for name in ("send_many", "send_channel", "send_admins"):
+        monkeypatch.setattr(orchestrator.notifier, name, noop)
+    event_id = await _event_with_plan()
+    assert (await client.post(f"/api/admin/events/{event_id}/actual", headers=ADMIN, json={"value": 0.5})).status_code == 200
+    assert (await client.post(f"/api/admin/events/{event_id}/actual", headers=ADMIN, json={"value": 0.5})).status_code == 409
+    events = (await client.get("/api/events")).json()
+    assert events[0]["state"] == "RESOLVED"

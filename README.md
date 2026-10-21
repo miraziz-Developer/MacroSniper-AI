@@ -1,124 +1,65 @@
-# 🎯 MacroSniper AI (Aether News Sniper) — To'liq SaaS Platforma
+# MacroSniper v2 — XAUUSD makro yangilik rejalari
 
-Forex bozoridagi eng kuchli makroiqtisodiy yangiliklar (**CPI, NFP, FOMC, PPI**) vaqtida sodir bo'ladigan 500–2000 punktlik (50–200 pip) trendlarni **yangilikdan 2 daqiqa oldin (4:58 Pre-Sniper)** va **1 soniya ichida (5:00:01 Kill-Switch)** ushlab beruvchi avtomatlashtirilgan AI SaaS platformasi.
+AQSH Tier-1 yangiliklari (CPI, NFP, FOMC, Claims, PCE, PPI, Retail Sales, GDP, ISM) uchun
+XAUUSD bo'yicha **haqiqiy bozor ma'lumotiga asoslangan** savdo rejasini Telegram bot va Mini App
+orqali VIP obunachilarga beradi. To'lov — Telegram Stars. Batafsil dizayn: [docs/SPEC.md](docs/SPEC.md).
 
----
+## Qanday ishlaydi
 
-## 🏗️ 1. Arxitektura va 5 Bosqichli Holat Boshqaruvi (State Machine)
-
-Har bir yangilik bazada (**PostgreSQL / SQLite + Redis**) quyidagi 5 ta holatdan o'tadi:
-
-```mermaid
-stateDiagram-v2
-    [*] --> SCHEDULED: 10:00 (FMP / Finnhub / Calendar Watcher)
-    SCHEDULED --> MACRO_ANALYZED: T-3h (Fundamental AI: ADP, ISM, PPI tahlili)
-    MACRO_ANALYZED --> LIQUIDITY_MAPPED: T-1h (MT5 Order Block, FVG, ATR skaneri)
-    LIQUIDITY_MAPPED --> TRAP_DEPLOYED: T-2m (4:58: Judas Swing Trap + Breakout Stop)
-    TRAP_DEPLOYED --> LIVE_MONITORING: 17:30:00 (Ultra-Past Kechikishli Poller / Speech AI)
-    LIVE_MONITORING --> DATA_CONFIRMED: 5:00:01 (Raqam tasdiqlandi -> TP +1000 pips)
-    LIVE_MONITORING --> SAFETY_TRIGGERED: 5:00:01 (Data Shock -> Kill-Switch Emergency Cancel & Flip)
-    DATA_CONFIRMED --> [*]
-    SAFETY_TRIGGERED --> [*]
+```
+ForexFactory (har 30 daq) ─► Event SCHEDULED
+   T-3h  ─► Kontekst: DXY, US10Y (Yahoo) + prognoz/avvalgi  ─► VIP'larga "3 soat qoldi"
+   T-2m  ─► Reja: 15m ATR(14) + 4 soatlik diapazon (Binance PAXG / COMEX) ─► BUY STOP + SELL STOP
+   T+20s ─► Fakt: FMP (kalit bo'lsa) yoki admin /actual ─► qaysi order qoladi ─► VIP + kanal
 ```
 
----
+- Har bosqich DB'da bir marta belgilanadi (`event_stages`) — restartdan keyin ham xabar takrorlanmaydi.
+- Narx ma'lumoti olinmasa reja **yuborilmaydi**, adminga ogohlantirish ketadi (soxta raqam yo'q).
+- Yo'nalish faqat kontekst balli |50| dan yuqori bo'lsa aytiladi, aks holda "faqat breakout".
+- Barcha USD "High" va rejalashtiriladigan "Medium" relizlar (Claims, PMI…) olinadi.
+- Nutqlar (Powell Speaks va h.k.) kalendarda ko'rinadi, lekin reja tuzilmaydi.
 
-## 🧮 2. Matematik Baholash Formulalari
+## Bot buyruqlari
 
-AI qaror qabul qilishda qat'iy matematik og'irlik formulasidan foydalanadi:
+| Hamma | Admin (`TELEGRAM_ADMIN_IDS`) |
+|---|---|
+| `/start` `/events` `/plan` `/status` `/vip` `/paysupport` | `/stats` · `/grant ID KUN` · `/revoke ID` · `/actual EVENT_ID QIYMAT` (ID'lar `/events` da) |
 
-$$S_{total} = (0.45 \times F_{macro}) + (0.35 \times T_{liquidity}) + (0.20 \times C_{intermarket})$$
+## Lokal ishga tushirish
 
-* **$\vert{}S_{total}\vert{} \ge 65$:** **High Conviction (Kuchli Signal)** — Judas Swing Limit Trap va Breakout Stop orderlar qo'yiladi.
-* **$40 \le \vert{}S_{total}\vert{} < 65$:** **Medium Conviction** — Kengroq masofadagi Limit Trap.
-* **$\vert{}S_{total}\vert{} < 40$:** **NO PRE-TRADE (Depozitni Asrash Qoidasi)** — Bozor noaniq bo'lsa, order qo'yilmaydi; faqat 3-daqiqadagi tasdiq kutiladi.
-
----
-
-## ⚡ 3. 5:00:01 dagi "Safety & Kill-Switch" Mexanizmi
-
-* **Senariy 1 (Data Confirmed — 75% holatda):**  
-  AI 4:58 da "CPI yuqori chiqadi, XAUUSD SELL" dedi va haqiqatan ham CPI yuqori chiqdi:  
-  `✅ ACTUAL DATA CONFIRMED! Orderlarni ushlab turing, maqsad: 1000+ pips!`
-* **Senariy 2 (Data Shock — Teskari raqam):**  
-  Agar kutilmagan syurpriz sodir bo'lib, raqam teskari chiqsa:  
-  `⚠️ DATA SHOCK! Sell Limit orderni darhol CANCEL qiling va Marketdan BUY oching!`
-
----
-
-## 📁 4. Papkalar Tuzilmasi
-
-```text
-news_forex/
-├── run_simulation.py            # Barcha 5 bosqichni 1 soniyada vizual simulyatsiya qilish
-├── docker-compose.yml           # PostgreSQL + Redis + App
-├── requirements.txt             # Barcha kerakli kutubxonalar
-├── .env.example / .env          # API kalitlar va muhit sozlamalari
-├── pytest.ini                   # Pytest sozlamalari
-├── static/cards/                # Generatsiya qilingan Dark-Mode PNG kartochkalari
-│   ├── cpi_sniper_signal.png
-│   ├── cpi_actual_confirmed.png
-│   └── cpi_kill_switch_triggered.png
-├── app/
-│   ├── main.py                  # FastAPI server va Webhooklar
-│   ├── bot_main.py              # Aiogram 3 Telegram Bot polling daemoni
-│   ├── core/
-│   │   ├── config.py            # Pydantic v2 Settings
-│   │   ├── database.py          # SQLAlchemy Async Session & Engine
-│   │   ├── redis_client.py      # Async Redis (In-Memory fallback bilan)
-│   │   └── scheduler.py         # APScheduler (T-3h, T-1h, T-2m, T-10s joblar)
-│   ├── models/
-│   │   ├── event.py             # EconomicEvent & SniperSignal jadvallari
-│   │   └── user.py              # Foydalanuvchilar va VIP obunalar
-│   ├── engines/
-│   │   ├── calendar_watcher.py  # FMP, Finnhub va Ultra-Fast poller
-│   │   ├── macro_engine.py      # T-3h Fundamental skanerlash (ADP, ISM, PPI)
-│   │   ├── liquidity_engine.py  # T-1h MT5 Order Block, FVG, ATR skanerlash
-│   │   ├── sniper_decision.py   # T-2m (4:58) Judas Swing va Breakout hisoblash
-│   │   ├── safety_guard.py      # 5:00:01 Instant Actual vs Forecast Kill-Switch
-│   │   └── live_speech_ai.py    # FOMC / ECB jonli nutq (Deepgram + Groq LPU)
-│   ├── services/
-│   │   ├── card_renderer.py     # Pillow Dark-Mode signal kartochkalari
-│   │   ├── telegram_sender.py   # Aiogram 3 VIP kanallarga xabarnomalar
-│   │   ├── bot_handlers.py      # Telegram bot buyruqlari (/start, /events, /signals, /vip)
-│   │   └── mt5_copier.py        # MT5 ga < 150ms da buyruq tashlash va bekor qilish
-│   └── api/
-│       └── miniapp.py           # Telegram Mini App Web Terminal (HTML5/Tailwind)
-└── tests/
-    ├── test_api.py              # API & Mini App testlari
-    ├── test_calendar.py         # Kalendar va Fast-Poller testlari
-    ├── test_card_renderer.py    # PNG kartochka generatsiyasi testlari
-    ├── test_live_speech_ai.py   # Jonli nutq tahlili testlari
-    ├── test_safety_guard.py     # 5:00:01 Kill-Switch testlari
-    ├── test_services.py         # Telegram va MT5 Copier testlari
-    ├── test_sniper_decision.py  # Matematik scoring va pre-sniper trap testlari
-    └── test_state_machine.py    # 5 bosqichli to'liq sikl testi
-```
-
----
-
-## 🚀 5. Ishga Tushirish va Tekshirish
-
-### 1) Bir martalik to'liq simulyatsiyani ishga tushirish (Demo):
 ```bash
-python run_simulation.py
-```
-*Bu buyruq 10:00 dan boshlab 17:30:01 gacha bo'lgan barcha bosqichlarni terminalda ko'rsatadi va `static/cards/` papkasiga 3 ta haqiqiy Dark-Mode signal kartochkasini saqlaydi.*
-
-### 2) FastAPI va Telegram Mini Appni ishga tushirish:
-```bash
-.venv/bin/uvicorn app.main:app --reload --port 8000
-```
-* Brauzerda Telegram Mini App: `http://localhost:8000/miniapp`
-* Swagger API Hujjatlari: `http://localhost:8000/docs`
-
-### 3) Telegram Botni ishga tushirish:
-```bash
-.venv/bin/python -m app.bot_main
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
+cp .env.example .env   # TELEGRAM_BOT_TOKEN va TELEGRAM_ADMIN_IDS ni to'ldiring
+uvicorn app.main:app --reload
+pytest -q
 ```
 
-### 4) Barcha avtomatlashtirilgan testlarni yurgizish:
-```bash
-.venv/bin/pytest -v
-```
-*(16 ta testning barchasi 100% muvaffaqiyatli o'tadi).*
+## Render'ga bepul deploy
+
+1. **Neon** (neon.tech) da bepul Postgres yarating va connection string'ni oling.
+   Render'dagi SQLite har restartda o'chadi — obunalar yo'qolmasligi uchun Postgres shart.
+2. Render → Blueprint → shu repo (`render.yaml`). Environment'da to'ldiring:
+   `DATABASE_URL` (Neon), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ADMIN_IDS`, ixtiyoriy `TELEGRAM_CHANNEL_ID`, `FMP_API_KEY`.
+3. **UptimeRobot** (bepul): `https://<servis>.onrender.com/health` ni har 5 daqiqada tekshiradigan monitor qo'shing.
+   Aks holda Render bepul serveri 15 daqiqada uxlaydi va rejalar o'z vaqtida chiqmaydi.
+4. @BotFather → Bot Settings → Menu Button / Mini App URL: `https://<servis>.onrender.com/miniapp`.
+5. Kanal ishlatsangiz, botni kanalga admin qiling.
+
+## Admin HTTP API
+
+`X-Admin-Token: <ADMIN_API_TOKEN>` header bilan:
+
+- `POST /api/admin/sync` — kalendarni hozir yangilash
+- `POST /api/admin/events/{id}/actual` `{"value": 0.4}` — faktni kiritish
+- `POST /api/admin/events/{id}/run/{context|plan}` — bosqichni qo'lda ishga tushirish (baribir bir marta)
+
+Ommaviy: `GET /health`, `GET /api/events`, `GET /miniapp`.
+
+## Cheklovlar
+
+- Yahoo Finance rasmiy API emas; ishlamasa Binance zaxira, DXY/yields bo'lmasa kontekst "neytral".
+- PAXG spot oltinni kuzatadi, lekin brokeringiz narxidan bir necha dollar farq qilishi mumkin —
+  xabarlarda har bir order uchun narxdan masofa ham ko'rsatiladi.
+- Bepul FMP tarifida fakt kechikishi mumkin; eng ishonchli yo'l — admin `/actual`.
+- Bu moliyaviy maslahat emas.
