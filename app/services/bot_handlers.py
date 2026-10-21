@@ -16,7 +16,7 @@ router = Router()
 
 
 def get_main_keyboard() -> InlineKeyboardMarkup:
-    mini_app_url = "https://macrosniper-ai.web.app"
+    mini_app_url = settings.MINI_APP_URL
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [

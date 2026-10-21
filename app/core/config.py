@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     TELEGRAM_VIP_CHANNEL_ID: Optional[str] = None
     TELEGRAM_FREE_CHANNEL_ID: Optional[str] = None
     TELEGRAM_ADMIN_IDS: str = ""
+    MINI_APP_URL: str = "https://macrosniper-ai.onrender.com/miniapp"
 
     @property
     def admin_id_list(self) -> List[int]:

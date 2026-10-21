@@ -178,7 +178,7 @@ class TelegramNotifier:
                 [
                     InlineKeyboardButton(
                         text="📱 MacroSniper Mini App",
-                        web_app=WebAppInfo(url="https://macrosniper-ai.web.app"),
+                        web_app=WebAppInfo(url=settings.MINI_APP_URL),
                     )
                 ]
             ]
