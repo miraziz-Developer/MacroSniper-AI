@@ -1,8 +1,10 @@
 import logging
+from datetime import datetime, timedelta, timezone
 from aiogram import Router, types, F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramBadRequest
 from sqlalchemy import select
 
 from app.core.database import AsyncSessionLocal
@@ -13,6 +15,7 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 router = Router()
+TASHKENT_TZ = timezone(timedelta(hours=5))
 
 
 def get_main_keyboard() -> InlineKeyboardMarkup:
@@ -35,6 +38,19 @@ def get_main_keyboard() -> InlineKeyboardMarkup:
             ],
         ]
     )
+
+
+async def _reply(event_obj: types.Message | types.CallbackQuery, text: str) -> None:
+    if isinstance(event_obj, types.CallbackQuery):
+        await event_obj.answer()
+        try:
+            await event_obj.message.edit_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_keyboard())
+        except TelegramBadRequest as e:
+            # Pressing the same button twice is not an error for the user
+            if "message is not modified" not in str(e):
+                raise
+    else:
+        await event_obj.answer(text, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_keyboard())
 
 
 @router.message(Command("start"))
@@ -79,19 +95,23 @@ async def cmd_start(message: types.Message):
 @router.message(Command("events"))
 @router.callback_query(F.data == "btn_events")
 async def cmd_events(event_obj: types.Message | types.CallbackQuery):
-    message = event_obj if isinstance(event_obj, types.Message) else event_obj.message
-
     async with AsyncSessionLocal() as session:
-        q = select(EconomicEvent).order_by(EconomicEvent.event_time.asc()).limit(10)
+        since = datetime.now(timezone.utc) - timedelta(hours=1)
+        q = (
+            select(EconomicEvent)
+            .where(EconomicEvent.event_time >= since)
+            .order_by(EconomicEvent.event_time.asc())
+            .limit(10)
+        )
         res = await session.execute(q)
         events = res.scalars().all()
 
     if not events:
-        text = "📅 **Bugun uchun rejalashtirilgan Tier-1 qizil yangiliklar topilmadi.**"
+        text = "📅 **Yaqin vaqtda rejalashtirilgan Tier-1 yangiliklar topilmadi.**"
     else:
-        text = "📅 **BUGUNGI TIER-1 MAKRO YANGILIKLAR PIPELINE:**\n\n"
+        text = "📅 **YAQINLASHAYOTGAN TIER-1 MAKRO YANGILIKLAR:**\n\n"
         for ev in events:
-            time_str = ev.event_time.strftime("%H:%M UTC")
+            time_str = ev.event_time.astimezone(TASHKENT_TZ).strftime("%d.%m %H:%M (Toshkent)")
             state_emoji = {
                 "SCHEDULED": "⏳",
                 "MACRO_ANALYZED": "🧠",
@@ -108,18 +128,12 @@ async def cmd_events(event_obj: types.Message | types.CallbackQuery):
                 f"• Holat: `{ev.state.value}` | Total Score: `{ev.total_score:+0.1f}`\n\n"
             )
 
-    if isinstance(event_obj, types.CallbackQuery):
-        await event_obj.answer()
-        await message.edit_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_keyboard())
-    else:
-        await message.answer(text, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_keyboard())
+    await _reply(event_obj, text)
 
 
 @router.message(Command("signals"))
 @router.callback_query(F.data == "btn_signals")
 async def cmd_signals(event_obj: types.Message | types.CallbackQuery):
-    message = event_obj if isinstance(event_obj, types.Message) else event_obj.message
-
     async with AsyncSessionLocal() as session:
         q = select(SniperSignal).order_by(SniperSignal.id.desc()).limit(1)
         res = await session.execute(q)
@@ -142,18 +156,12 @@ async def cmd_signals(event_obj: types.Message | types.CallbackQuery):
             f"Holat: `{signal.status}` | Kill-Switch: `{signal.is_kill_switch_triggered}`"
         )
 
-    if isinstance(event_obj, types.CallbackQuery):
-        await event_obj.answer()
-        await message.edit_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_keyboard())
-    else:
-        await message.answer(text, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_keyboard())
+    await _reply(event_obj, text)
 
 
 @router.message(Command("vip"))
 @router.callback_query(F.data == "btn_vip")
 async def cmd_vip(event_obj: types.Message | types.CallbackQuery):
-    message = event_obj if isinstance(event_obj, types.Message) else event_obj.message
-
     text = (
         f"💎 **MACRO SNIPER AI — OBUNA TARIFLARI**\n\n"
         f"1️⃣ **FREE TIER (BEPUL):**\n"
@@ -171,18 +179,12 @@ async def cmd_vip(event_obj: types.Message | types.CallbackQuery):
         f"💳 Obunani faollashtirish uchun: @MacroSniperAdmin ga murojaat qiling."
     )
 
-    if isinstance(event_obj, types.CallbackQuery):
-        await event_obj.answer()
-        await message.edit_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_keyboard())
-    else:
-        await message.answer(text, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_keyboard())
+    await _reply(event_obj, text)
 
 
 @router.message(Command("copier"))
 @router.callback_query(F.data == "btn_copier")
 async def cmd_copier(event_obj: types.Message | types.CallbackQuery):
-    message = event_obj if isinstance(event_obj, types.Message) else event_obj.message
-
     text = (
         f"🤖 **METATRADER 5 AUTO-COPIER BRIDGE**\n\n"
         f"Siz signallarni qo'lda kiritishga ulgurmaysizmi? "
@@ -194,8 +196,4 @@ async def cmd_copier(event_obj: types.Message | types.CallbackQuery):
         f"Hisobingizni ulash uchun Mini App orqali MT5 login va serveringizni kiriting."
     )
 
-    if isinstance(event_obj, types.CallbackQuery):
-        await event_obj.answer()
-        await message.edit_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_keyboard())
-    else:
-        await message.answer(text, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_keyboard())
+    await _reply(event_obj, text)

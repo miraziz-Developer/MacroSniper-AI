@@ -12,6 +12,9 @@ from sqlalchemy import select
 from app.core.database import get_db
 from app.models.event import EconomicEvent, SniperSignal
 from app.engines.live_price_feed import live_price_feed
+from app.engines.macro_engine import macro_engine
+from app.engines.multi_asset_engine import multi_asset_engine
+from app.models.event import EventState
 
 logger = logging.getLogger(__name__)
 
@@ -410,6 +413,8 @@ async def serve_telegram_mini_app():
             }
         }
 
+        const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+
         function renderCalendar(events) {
             const listEl = document.getElementById('calendar-list');
             listEl.innerHTML = '';
@@ -424,15 +429,15 @@ async def serve_telegram_mini_app():
                 item.innerHTML = `
                     <div>
                         <div class="flex items-center space-x-1.5">
-                            <span class="font-bold text-white">${ev.country}</span>
-                            <span class="text-[10px] px-1.5 py-0.2 rounded border ${badgeColor}">${ev.impact}</span>
+                            <span class="font-bold text-white">${esc(ev.country)}</span>
+                            <span class="text-[10px] px-1.5 py-0.2 rounded border ${badgeColor}">${esc(ev.impact)}</span>
                             <span class="text-slate-400 font-mono text-[10px]">${timeStr}</span>
                         </div>
-                        <div class="text-slate-200 font-medium mt-0.5 text-[11px]">${ev.title}</div>
+                        <div class="text-slate-200 font-medium mt-0.5 text-[11px]">${esc(ev.title)}</div>
                     </div>
                     <div class="text-right font-mono text-[11px]">
-                        <div class="text-slate-400 text-[10px]">P: ${ev.previous}</div>
-                        <div class="text-emerald-400 font-bold">F: ${ev.forecast}</div>
+                        <div class="text-slate-400 text-[10px]">P: ${esc(ev.previous)}</div>
+                        <div class="text-emerald-400 font-bold">F: ${esc(ev.forecast)}</div>
                     </div>
                 `;
                 listEl.appendChild(item);
@@ -525,7 +530,8 @@ async def get_miniapp_dashboard_data(db: AsyncSession = Depends(get_db)):
     events = event_res.scalars().all()
 
     future_events = [e for e in events if make_aware(e.event_time) >= now]
-    active_event = future_events[0] if future_events else (events[0] if events else None)
+    future_usd = [e for e in future_events if e.currency == "USD"]
+    active_event = (future_usd or future_events or [None])[0]
 
     # 3. Read cached calendar for weekly schedule
     cache_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "ff_calendar_cache.json")
@@ -557,35 +563,51 @@ async def get_miniapp_dashboard_data(db: AsyncSession = Depends(get_db)):
     )
 
     if active_event:
-        if active_event.macro_score is not None:
-            is_bullish = active_event.macro_score < 0
-        elif "cpi" in active_event.title.lower():
-            is_bullish = False
-        elif "unemployment" in active_event.title.lower():
-            is_bullish = True
-        
-        if active_event.analysis_summary:
-            ai_reason = active_event.analysis_summary
+        if active_event.state == EventState.SCHEDULED:
+            # Not analyzed yet: preview the same macro engine the T-3h step will run
+            preview = macro_engine.analyze_event(active_event.title, active_event.forecast, active_event.previous)
+            is_bullish = preview.macro_score < 0
+            ai_reason = preview.bias_summary
+        else:
+            is_bullish = (active_event.macro_score or 0.0) < 0
+            ai_reason = active_event.analysis_summary or ai_reason
 
     # Format Tashkent time (UTC+5)
     tashkent_time_str = "Bugun 17:30 da"
     if active_event and active_event.event_time:
         aware_dt = make_aware(active_event.event_time)
         tashkent_dt = aware_dt.astimezone(timezone(timedelta(hours=5)))
-        tashkent_time_str = tashkent_dt.strftime("%d-%B, %H:%M (Toshkent vaqti)")
-
-    # Coordinates
-    market_sl = round(live_price - 8.50 if is_bullish else live_price + 8.50, 2)
-    market_tp = round(live_price + 18.00 if is_bullish else live_price - 18.00, 2)
-
-    stop_entry = round(live_price + 6.00 if is_bullish else live_price - 6.00, 2)
-    stop_sl = round(live_price - 4.50 if is_bullish else live_price + 4.50, 2)
-    stop_tp = round(live_price + 16.00 if is_bullish else live_price - 16.00, 2)
+        tashkent_time_str = tashkent_dt.strftime("%d.%m.%Y, %H:%M (Toshkent vaqti)")
 
     # Query latest signal from db if any
     signal_query = select(SniperSignal).order_by(SniperSignal.id.desc()).limit(1)
     sig_res = await db.execute(signal_query)
     db_signal = sig_res.scalar_one_or_none()
+
+    # Once the 4:58 signal exists for this event, show exactly what was sent to Telegram
+    event_signal = (
+        db_signal
+        if db_signal and active_event and db_signal.event_id == active_event.id and db_signal.status != "NO_TRADE"
+        else None
+    )
+    confidence = 85
+    if event_signal:
+        is_bullish = "BUY" in event_signal.bias
+        confidence = event_signal.confidence
+
+    # Market order uses the same formula as sniper_decision (ATR * 1.8 + news spread / ATR * 3.5)
+    atr = event_signal.atr_m15 if event_signal else 4.50
+    sl_dist = atr * 1.8 + multi_asset_engine.get_specs("XAUUSD").typical_news_spread
+    tp_dist = atr * 3.5
+    market_sl = round(live_price - sl_dist if is_bullish else live_price + sl_dist, 2)
+    market_tp = round(live_price + tp_dist if is_bullish else live_price - tp_dist, 2)
+
+    if event_signal:
+        stop_entry, stop_sl, stop_tp = event_signal.stop_break_price, event_signal.stop_sl, event_signal.stop_tp
+    else:
+        stop_entry = round(live_price + 6.00 if is_bullish else live_price - 6.00, 2)
+        stop_sl = round(live_price - 4.50 if is_bullish else live_price + 4.50, 2)
+        stop_tp = round(live_price + 16.00 if is_bullish else live_price - 16.00, 2)
 
     latest_signal_dict = {
         "id": db_signal.id if db_signal else 1,
@@ -610,11 +632,11 @@ async def get_miniapp_dashboard_data(db: AsyncSession = Depends(get_db)):
         "current_time_utc": now.isoformat(),
         "live_price": live_price,
         "is_bullish": is_bullish,
-        "confidence": 85,
+        "confidence": confidence,
         "active_event": {
             "title": active_event.title if active_event else "AQSH: Ishsizlik Arzalari (Unemployment Claims)",
             "state": active_event.state if active_event else "SCHEDULED",
-            "event_time": active_event.event_time.isoformat() if active_event else None,
+            "event_time": make_aware(active_event.event_time).isoformat() if active_event else None,
             "tashkent_time_str": tashkent_time_str,
             "ai_reason": ai_reason,
             "forecast": active_event.forecast if active_event else 200.0,

@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
     APP_PORT: int = Field(default=8000, validation_alias="PORT")
     SECRET_KEY: str = "secret-sniper-key"
+    # Required in X-Admin-Token header for sync/trigger/webhook endpoints; unset = endpoints disabled
+    ADMIN_API_TOKEN: Optional[str] = None
 
     # Database & Cache
     DATABASE_URL: str = "sqlite+aiosqlite:///./macrosniper.db"

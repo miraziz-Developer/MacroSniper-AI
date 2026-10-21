@@ -13,7 +13,24 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.orm import relationship
+from sqlalchemy.types import TypeDecorator
 from app.core.database import Base
+
+
+class UTCDateTime(TypeDecorator):
+    """Stores UTC and always returns tz-aware UTC (SQLite silently drops tzinfo)."""
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is not None and value.tzinfo is not None:
+            value = value.astimezone(timezone.utc)
+        return value
+
+    def process_result_value(self, value, dialect):
+        if value is not None and value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value
 
 
 class EventState(str, enum.Enum):
@@ -45,7 +62,7 @@ class EconomicEvent(Base):
     currency = Column(String(8), nullable=False, default="USD")
     impact = Column(SQLEnum(EventImpact), default=EventImpact.HIGH, index=True)
     
-    event_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    event_time = Column(UTCDateTime, nullable=False, index=True)
     
     previous = Column(Float, nullable=True)
     forecast = Column(Float, nullable=True)

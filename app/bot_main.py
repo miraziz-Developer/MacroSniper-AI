@@ -25,6 +25,9 @@ async def run_bot():
     logger.info("MacroSniper Telegram Bot started polling...")
     try:
         await dp.start_polling(bot)
+    except Exception:
+        # Runs as a background task inside the web app; without this the crash would be silent
+        logger.exception("Telegram bot polling crashed")
     finally:
         await bot.session.close()
 

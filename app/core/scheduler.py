@@ -12,7 +12,12 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler(timezone="UTC")
 
 
-async def schedule_event_pipeline(event_id: int, event_time: datetime):
+async def schedule_event_pipeline(
+    event_id: int,
+    event_time: datetime,
+    state: EventState = EventState.SCHEDULED,
+    currency: str = "USD",
+):
     """
     Schedules the 4-step timeline for a given event:
     T-3h, T-1h, T-2m, and T-10s (Fast Poller).
@@ -20,6 +25,13 @@ async def schedule_event_pipeline(event_id: int, event_time: datetime):
     if event_time.tzinfo is None:
         event_time = event_time.replace(tzinfo=timezone.utc)
     now = datetime.now(timezone.utc)
+
+    # Signals are XAUUSD-only, so only USD releases drive the pipeline; others stay calendar-only.
+    if currency != "USD":
+        return
+    # Already released: never fire catch-up alerts for past events (e.g. after a restart).
+    if event_time <= now:
+        return
     
     t_minus_3h = event_time - timedelta(hours=3)
     t_minus_1h = event_time - timedelta(hours=1)
@@ -37,8 +49,8 @@ async def schedule_event_pipeline(event_id: int, event_time: datetime):
             replace_existing=True,
         )
         logger.info(f"Scheduled T-3h job for event {event_id} at {t_minus_3h}")
-    else:
-        # If already within 3h, run immediately
+    elif state == EventState.SCHEDULED:
+        # Already within 3h and not yet analyzed: run immediately
         await run_scheduled_t3h(event_id)
 
     # 2. T-1 Hour: MT5 Liquidity Map
@@ -115,8 +127,26 @@ async def run_scheduled_poller(event_id: int):
             )
 
 
+async def sync_and_schedule() -> int:
+    """Pulls the calendar and (re)schedules every upcoming event's timeline. Safe to repeat."""
+    async with AsyncSessionLocal() as session:
+        events = await orchestrator.sync_morning_schedule(session)
+    for ev in events:
+        await schedule_event_pipeline(ev.id, ev.event_time, ev.state, ev.currency)
+    return len(events)
+
+
 def start_scheduler():
     if not scheduler.running:
+        # First run right away, then every 30 min so new days/weeks are picked up without a restart.
+        scheduler.add_job(
+            sync_and_schedule,
+            "interval",
+            minutes=30,
+            id="calendar_sync",
+            next_run_time=datetime.now(timezone.utc),
+            replace_existing=True,
+        )
         scheduler.start()
         logger.info("MacroSniper timeline scheduler started.")
 

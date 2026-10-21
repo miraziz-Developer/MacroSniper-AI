@@ -1,17 +1,18 @@
 import asyncio
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from typing import List, Optional
 from datetime import datetime, timezone
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, Query, Header
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict
 
 from app.core.config import settings
-from app.core.database import init_db, get_db, AsyncSessionLocal
+from app.core.database import init_db, get_db
 from app.core.redis_client import cache
-from app.core.scheduler import start_scheduler, shutdown_scheduler, schedule_event_pipeline
+from app.core.scheduler import start_scheduler, shutdown_scheduler, sync_and_schedule
 from app.models.event import EconomicEvent, SniperSignal, EventState
 from app.engines.event_orchestrator import orchestrator
 from app.api.miniapp import router as miniapp_router
@@ -29,14 +30,8 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.APP_NAME} in {settings.APP_ENV} mode...")
     await init_db()
     await cache.connect()
+    # Also runs the first calendar sync in the background, so the port binds immediately
     start_scheduler()
-    
-    # Run initial calendar sync on startup
-    async with AsyncSessionLocal() as session:
-        events = await orchestrator.sync_morning_schedule(session)
-        for ev in events:
-            if ev.state == EventState.SCHEDULED:
-                await schedule_event_pipeline(ev.id, ev.event_time)
 
     # Start Telegram Bot Polling concurrently if token is configured
     bot_task = None
@@ -115,6 +110,13 @@ class WebhookReleasePayload(BaseModel):
     current_price: Optional[float] = None
 
 
+async def require_admin(x_admin_token: Optional[str] = Header(None)) -> None:
+    """Guards endpoints that post to the VIP channel or touch MT5."""
+    expected = settings.ADMIN_API_TOKEN
+    if not expected or not secrets.compare_digest(x_admin_token or "", expected):
+        raise HTTPException(status_code=403, detail="Valid X-Admin-Token header required")
+
+
 # ==========================================
 # API Routes
 # ==========================================
@@ -132,20 +134,22 @@ async def health_check():
 
 @app.get("/api/events/today", response_model=List[EventResponse], tags=["Economic Events"])
 async def get_todays_events(db: AsyncSession = Depends(get_db)):
-    """Returns all scheduled macroeconomic news for today."""
-    query = select(EconomicEvent).order_by(EconomicEvent.event_time.asc())
+    """Returns macroeconomic news from today (UTC) onwards."""
+    start_of_day = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    query = (
+        select(EconomicEvent)
+        .where(EconomicEvent.event_time >= start_of_day)
+        .order_by(EconomicEvent.event_time.asc())
+    )
     result = await db.execute(query)
     return result.scalars().all()
 
 
-@app.post("/api/events/sync", tags=["Economic Events"])
-async def force_sync_calendar(db: AsyncSession = Depends(get_db)):
+@app.post("/api/events/sync", tags=["Economic Events"], dependencies=[Depends(require_admin)])
+async def force_sync_calendar():
     """Triggers immediate calendar synchronization."""
-    events = await orchestrator.sync_morning_schedule(db)
-    for ev in events:
-        if ev.state == EventState.SCHEDULED:
-            await schedule_event_pipeline(ev.id, ev.event_time)
-    return {"message": "Sync completed successfully", "count": len(events)}
+    count = await sync_and_schedule()
+    return {"message": "Sync completed successfully", "count": count}
 
 
 @app.get("/api/events/{event_id}", response_model=EventResponse, tags=["Economic Events"])
@@ -156,7 +160,7 @@ async def get_event_details(event_id: int, db: AsyncSession = Depends(get_db)):
     return event
 
 
-@app.post("/api/events/{event_id}/trigger/{step}", tags=["Testing & Simulation"])
+@app.post("/api/events/{event_id}/trigger/{step}", tags=["Testing & Simulation"], dependencies=[Depends(require_admin)])
 async def trigger_event_step(
     event_id: int,
     step: str,
@@ -169,6 +173,9 @@ async def trigger_event_step(
     - step: 't1h' -> Maps MT5 liquidity zones
     - step: 't2m' -> Generates 4:58 Pre-Sniper Limit and Stop orders
     """
+    if step in ("t3h", "t1h", "t2m") and not await db.get(EconomicEvent, event_id):
+        raise HTTPException(status_code=404, detail="Event not found")
+
     if step == "t3h":
         event = await orchestrator.advance_to_t3h_macro(event_id, db)
         return {"status": "success", "state": event.state, "macro_score": event.macro_score}
@@ -191,7 +198,7 @@ async def trigger_event_step(
         raise HTTPException(status_code=400, detail="Unknown step. Choose: 't3h', 't1h', or 't2m'")
 
 
-@app.post("/api/webhook/actual-release", tags=["Ultra-Fast Release & Kill-Switch"])
+@app.post("/api/webhook/actual-release", tags=["Ultra-Fast Release & Kill-Switch"], dependencies=[Depends(require_admin)])
 async def webhook_actual_release(
     payload: WebhookReleasePayload,
     db: AsyncSession = Depends(get_db),

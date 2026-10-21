@@ -435,10 +435,10 @@ class CalendarWatcher:
         self._is_polling = False
 
     async def sync_todays_red_events(self) -> List[CalendarEventRaw]:
-        """Fetches Tier-1 red-folder events for today from all available providers."""
+        """Fetches Tier-1 red-folder events from today through the next 7 days from all providers."""
         now = datetime.now(timezone.utc)
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        end = start + timedelta(days=1)
+        end = start + timedelta(days=7)  # whole week, so upcoming USD releases are visible and scheduled early
 
         unique_events: Dict[str, CalendarEventRaw] = {}
 

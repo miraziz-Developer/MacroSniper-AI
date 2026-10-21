@@ -74,3 +74,17 @@ async def test_full_state_machine_lifecycle(async_test_session: AsyncSession):
     )
     assert verification.is_confirmed is True
     assert event.state == EventState.DATA_CONFIRMED
+
+
+@pytest.mark.asyncio
+async def test_event_time_is_returned_as_aware_utc(async_test_session: AsyncSession):
+    # SQLite drops tzinfo; the Mini App countdown needs an explicit UTC offset
+    tashkent = timezone(timedelta(hours=5))
+    ev = EconomicEvent(title="US CPI", event_time=datetime(2026, 10, 21, 17, 30, tzinfo=tashkent))
+    async_test_session.add(ev)
+    await async_test_session.commit()
+    async_test_session.expunge_all()
+
+    loaded = await async_test_session.get(EconomicEvent, ev.id)
+    assert loaded.event_time == datetime(2026, 10, 21, 12, 30, tzinfo=timezone.utc)
+    assert loaded.event_time.isoformat().endswith("+00:00")
