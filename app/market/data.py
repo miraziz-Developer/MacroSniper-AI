@@ -1,4 +1,4 @@
-"""Free gold market data: Binance PAXG (tracks spot gold) with Yahoo COMEX futures as fallback."""
+"""Free gold market data: PAXG (tracks spot) on Binance, then Kraken (works from US clouds), then COMEX futures."""
 
 import logging
 import time
@@ -13,9 +13,10 @@ from app.market.indicators import Candle, atr, recent_range
 logger = logging.getLogger(__name__)
 
 BINANCE = "https://api.binance.com/api/v3"
+KRAKEN = "https://api.kraken.com/0/public"
 YAHOO = "https://query1.finance.yahoo.com/v8/finance/chart"
 HEADERS = {"User-Agent": "Mozilla/5.0 (MacroSniper)"}
-PAXG, COMEX = "Binance PAXG", "COMEX GC=F"  # price source names, stored with each plan
+PAXG, KRAKEN_PAXG, COMEX = "Binance PAXG", "Kraken PAXG", "COMEX GC=F"  # source names, stored with each plan
 TIMEOUT = httpx.Timeout(6.0)
 
 _cache: Dict[str, Tuple[float, Any]] = {}
@@ -55,6 +56,19 @@ async def _binance_candles(interval: str, limit: int, start_ms: Optional[int] = 
         return None
 
 
+async def _kraken_candles(interval_min: int, since: Optional[int] = None) -> Optional[List[Candle]]:
+    # shortcut: Kraken returns at most the last 720 candles (12h at 1m); review runs ~2h after release
+    params = {"pair": "PAXGUSD", "interval": interval_min}
+    if since is not None:
+        params["since"] = since
+    data = await _get_json(f"{KRAKEN}/OHLC", params)
+    try:
+        rows = next(v for k, v in data["result"].items() if k != "last")
+        return [Candle(int(r[0]), float(r[1]), float(r[2]), float(r[3]), float(r[4])) for r in rows] or None
+    except (KeyError, StopIteration, TypeError, ValueError, IndexError):
+        return None
+
+
 async def _yahoo_candles(symbol: str, interval: str, rng: str) -> Optional[List[Candle]]:
     data = await _get_json(f"{YAHOO}/{symbol}", {"interval": interval, "range": rng})
     try:
@@ -72,6 +86,9 @@ async def gold_candles_15m() -> Tuple[Optional[List[Candle]], str]:
     candles = await _cached("gold15", 60, lambda: _binance_candles("15m", 200))
     if candles:
         return candles, PAXG
+    candles = await _cached("gold15k", 60, lambda: _kraken_candles(15))
+    if candles:
+        return candles, KRAKEN_PAXG
     candles = await _cached("gold15y", 60, lambda: _yahoo_candles("GC=F", "15m", "2d"))
     return (candles, COMEX) if candles else (None, "none")
 
@@ -95,6 +112,8 @@ async def minute_candles(source: str, start: datetime, minutes: int) -> Optional
     """1-minute candles from `start` (UTC) on the same instrument the plan was priced on — no caching."""
     if source == PAXG:
         candles = await _binance_candles("1m", min(minutes, 1000), start_ms=int(start.timestamp() * 1000))
+    elif source == KRAKEN_PAXG:
+        candles = await _kraken_candles(1, since=int(start.timestamp()) - 60)
     else:
         candles = await _yahoo_candles("GC=F", "1m", "5d")  # Yahoo keeps 1m data ~7 days
     if not candles:
@@ -117,7 +136,7 @@ async def levels_input() -> Optional[LevelsInput]:
     candles, source = await gold_candles_15m()
     if not candles:
         return None
-    # Price must come from the same instrument as the candles (PAXG and GC=F differ by several dollars)
+    # Price must come from the same feed as the candles (venues and futures differ by several dollars)
     price = (await gold_price())[0] if source == PAXG else round(candles[-1].close, 2)
     value = atr(candles, 14)
     rng = recent_range(candles, 16)
