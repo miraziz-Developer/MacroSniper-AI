@@ -173,3 +173,30 @@ async def test_calendar_falls_back_to_mirror_when_feed_is_blocked(monkeypatch):
     items = await ff.fetch_week()
     assert [i.title for i in items] == ["CPI m/m"]
     assert calls == [ff.FEED_URL, ff.settings.CALENDAR_MIRROR_URL]
+
+
+async def test_gold_feed_falls_back_binance_kraken_comex(monkeypatch):
+    from app.market import data
+
+    rows = [[1_700_000_000 + i * 900, "4090", "4092", "4088", str(4090 + i * 0.1), "4090", "1", 3] for i in range(20)]
+    yahoo = {"chart": {"result": [{"timestamp": [1, 2], "indicators": {"quote": [{
+        "open": [4100, 4101], "high": [4102, 4103], "low": [4099, 4100], "close": [4101, 4102]}]}}]}}
+    up = {"binance": False, "kraken": True}
+
+    async def fake_get_json(url, params=None):
+        if "binance" in url:
+            return None if not up["binance"] else [[0, "1", "1", "1", "1"]]
+        if "kraken" in url:
+            return {"error": [], "result": {"PAXGUSD": rows, "last": 0}} if up["kraken"] else None
+        return yahoo
+
+    monkeypatch.setattr(data, "_get_json", fake_get_json)
+    monkeypatch.setattr(data, "_cache", {})
+    candles, source = await data.gold_candles_15m()
+    assert source == data.KRAKEN_PAXG and len(candles) == 20 and candles[-1].close == 4091.9
+    levels = await data.levels_input()
+    assert levels.source == data.KRAKEN_PAXG and levels.price == 4091.9  # price from the same feed
+
+    up["kraken"] = False
+    monkeypatch.setattr(data, "_cache", {})
+    assert (await data.gold_candles_15m())[1] == data.COMEX
