@@ -32,12 +32,26 @@ async def _cached(key: str, ttl: float, loader: Callable[[], Awaitable[Any]]) ->
     return value
 
 
+GEO_BLOCK_PAUSE = 3600.0  # Binance answers 451 to US-hosted servers (e.g. Render); stop asking for an hour
+_blocked_until: Dict[str, float] = {}
+
+
 async def _get_json(url: str, params: Optional[dict] = None) -> Optional[Any]:
+    host = httpx.URL(url).host
+    if time.time() < _blocked_until.get(host, 0.0):
+        return None  # skip straight to the next source, no request, no log noise
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT, headers=HEADERS) as client:
             res = await client.get(url, params=params)
             res.raise_for_status()
             return res.json()
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 451:
+            _blocked_until[host] = time.time() + GEO_BLOCK_PAUSE
+            logger.info("%s is geo-blocked here (451); using fallback feeds for the next hour", host)
+        else:
+            logger.warning("Market request failed %s: %s", url, e)
+        return None
     except Exception as e:
         logger.warning("Market request failed %s: %s", url, e)
         return None
