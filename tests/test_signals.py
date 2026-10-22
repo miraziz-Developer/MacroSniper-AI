@@ -227,3 +227,22 @@ def test_bls_headline_math_and_new_print_detection():
     assert bls_headline("CPI m/m", cpi, date(2026, 11, 13)) is None  # October print not out yet
     jan = [{"year": "2025", "period": "M12", "value": "101"}, {"year": "2025", "period": "M11", "value": "100"}]
     assert bls_headline("Non-Farm Employment Change", jan, date(2026, 1, 9)) == 1  # January reports December
+
+
+async def test_geo_blocked_feed_is_skipped_for_an_hour(monkeypatch):
+    import httpx
+
+    from app.market import data
+
+    requests = []
+
+    def handler(request):
+        requests.append(str(request.url.host))
+        return httpx.Response(451, request=request)
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(data.httpx, "AsyncClient", lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw))
+    monkeypatch.setattr(data, "_blocked_until", {})
+    assert await data._get_json(f"{data.BINANCE}/ticker/price") is None
+    assert await data._get_json(f"{data.BINANCE}/klines") is None  # skipped: no second request
+    assert requests == ["api.binance.com"]
