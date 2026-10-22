@@ -15,7 +15,7 @@ scheduler = AsyncIOScheduler(timezone="UTC")
 
 CONTEXT_BEFORE = timedelta(hours=2)  # traders asked for 1.5–2h: 3h was too early, 1h too late
 PLAN_BEFORE = timedelta(minutes=2)
-POLL_AFTER = timedelta(seconds=20)
+POLL_AFTER = timedelta(0)  # BLS publishes at the release second
 REVIEW_AFTER = timedelta(minutes=orchestrator.REVIEW_MINUTES + 5)
 REVIEW_UNTIL = timedelta(days=1)
 

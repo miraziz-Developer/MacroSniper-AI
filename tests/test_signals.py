@@ -212,3 +212,18 @@ def test_live_odds_follow_surprise_then_price():
     assert history.odds("Unemployment Claims", 240, 225)["side"] == "BUY"  # more claims -> weaker USD
     assert history.odds("CPI m/m", 0.3, 0.3) == {"side": None, "p": 0.5, "basis": "inline", "size": None}
     assert history.odds("FOMC Member Speaks", 1, 2) is None and history.odds(nfp, None, 137) is None
+
+
+def test_bls_headline_math_and_new_print_detection():
+    from datetime import date
+
+    from app.calendar.actuals import bls_headline
+
+    nfp = [{"year": "2026", "period": "M09", "value": "159044"}, {"year": "2026", "period": "M08", "value": "159015"}]
+    cpi = [{"year": "2026", "period": "M09", "value": "336.298"}, {"year": "2026", "period": "M08", "value": "334.131"}]
+    assert bls_headline("Non-Farm Employment Change", nfp, date(2026, 10, 2)) == 29  # 29K
+    assert bls_headline("CPI m/m", cpi, date(2026, 10, 14)) == 0.6
+    assert bls_headline("Unemployment Rate", [{"year": "2026", "period": "M09", "value": "4.2"}], date(2026, 10, 2)) == 4.2
+    assert bls_headline("CPI m/m", cpi, date(2026, 11, 13)) is None  # October print not out yet
+    jan = [{"year": "2025", "period": "M12", "value": "101"}, {"year": "2025", "period": "M11", "value": "100"}]
+    assert bls_headline("Non-Farm Employment Change", jan, date(2026, 1, 9)) == 1  # January reports December

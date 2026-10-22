@@ -1,7 +1,7 @@
-"""Released ('actual') values. Automatic only with FMP_API_KEY; otherwise admins enter them with /actual."""
+"""Released ('actual') values: BLS (official source, seconds after release) for NFP/CPI, FMP, else admin /actual."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -69,3 +69,54 @@ async def fetch_fmp_actual(title: str, event_time: datetime, previous: Optional[
         logger.warning("FMP calendar request failed: %s", e)
         return None
     return match_actual(title, event_time, previous, data if isinstance(data, list) else [])
+
+
+BLS_URL = "https://api.bls.gov/publicAPI/v2/timeseries/data/"
+# FF title -> (BLS series, how the headline is derived from the index/level)
+BLS_SERIES = {
+    "Non-Farm Employment Change": ("CES0000000001", "diff"),  # thousands, like FF's "228K"
+    "CPI m/m": ("CUSR0000SA0", "pct"),
+    "Core CPI m/m": ("CUSR0000SA0L1E", "pct"),
+    "Unemployment Rate": ("LNS14000000", "level"),
+    "Average Hourly Earnings m/m": ("CES0500000003", "pct"),
+}
+
+
+def bls_headline(title: str, data: List[Dict[str, Any]], release_day: date) -> Optional[float]:
+    """Headline number for the month this release reports (the month before it), or None if not out yet."""
+    _, how = BLS_SERIES[title]
+    target = (release_day.year - 1, 12) if release_day.month == 1 else (release_day.year, release_day.month - 1)
+    obs = sorted(
+        ((int(r["year"]), int(r["period"][1:]), float(r["value"]))
+         for r in data if str(r.get("period", "")).startswith("M") and r["period"] != "M13" and r.get("value") not in ("", "-")),
+        reverse=True,
+    )
+    if not obs or obs[0][:2] != target:
+        return None  # still last month's data: the new print has not landed
+    current = obs[0][2]
+    if how == "level":
+        return current
+    if len(obs) < 2:
+        return None
+    previous = obs[1][2]
+    return round(current - previous) if how == "diff" else round((current / previous - 1) * 100, 1)
+
+
+async def fetch_bls_actual(title: str, release_day: date) -> Optional[float]:
+    if title not in BLS_SERIES:
+        return None
+    payload: Dict[str, Any] = {
+        "seriesid": [BLS_SERIES[title][0]], "startyear": str(release_day.year - 1), "endyear": str(release_day.year),
+    }
+    if settings.BLS_API_KEY:
+        payload["registrationkey"] = settings.BLS_API_KEY
+    try:
+        # BLS answers in 1–6 s (slower right at release); a short timeout would drop good answers
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            res = await client.post(BLS_URL, json=payload)
+        data = res.json()["Results"]["series"][0]["data"]
+    except Exception as e:  # BLS is slow and flaky right at release time; the caller retries
+        logger.info("BLS request failed: %s", e)
+        return None
+    return bls_headline(title, data, release_day)
+

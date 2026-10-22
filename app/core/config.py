@@ -49,6 +49,8 @@ class Settings(BaseSettings):
 
     # Optional: automatic actual values (free tier has delays; admin /actual is the fallback)
     FMP_API_KEY: Optional[str] = None
+    # Optional free key from data.bls.gov/registrationEngine: polls BLS every 1.5 s instead of 5 s
+    BLS_API_KEY: Optional[str] = None
 
     # Subscription (Telegram Stars)
     VIP_PRICE_STARS: int = 500

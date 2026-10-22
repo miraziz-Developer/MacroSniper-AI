@@ -27,6 +27,8 @@ services:
         generateValue: true
       - key: FMP_API_KEY
         sync: false
+      - key: BLS_API_KEY
+        sync: false
       - key: VIP_PRICE_STARS
         value: "500"
       - key: VIP_DAYS
