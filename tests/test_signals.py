@@ -4,14 +4,11 @@ import pytest
 
 from app.calendar.actuals import match_actual
 from app.calendar.forexfactory import parse_items, parse_number, parse_unit
-from app.market.data import MacroSnapshot
-from app.market.indicators import Candle, atr, pct_change, recent_range
-from app.signals.context import build_context
+from app.market.indicators import Candle, atr, recent_range
+from app.signals import history
 from app.signals.outcome import resolve
-from app.signals.plan import NEWS_SPREAD, build_plan
+from app.signals.plan import NEWS_SPREAD, build_plan, simulate
 from app.signals.rules import classify
-
-EMPTY = MacroSnapshot(None, None, None, None, None)
 
 
 @pytest.mark.parametrize(
@@ -47,49 +44,66 @@ def test_outcome_direction_per_kind():
     assert resolve(cpi, 0.3, None, None) == "INLINE"
 
 
-def test_context_needs_real_data_before_naming_a_side():
-    ctx = build_context(classify("CPI m/m"), 0.4, 0.2, EMPTY, threshold=50)
-    assert ctx.bias == "NEUTRAL" and ctx.data_points == 1
+# Plan geometry (ATR=4): entries 0.3–0.8 ATR outside price (+$0.50 spread), SL 2 ATR, TP1 1.5R, TP2 3R
+def test_plan_levels():
+    p = build_plan(price=4140.0, atr=4.0, range_high=4142.0, range_low=4120.0)
+    assert p.buy.entry == round(4142.0 + NEWS_SPREAD, 2)  # range high is 2.0 away (inside 1.2–3.2)
+    assert p.sell.entry == round(4140.0 - 3.2 - NEWS_SPREAD, 2)  # range low too far -> capped at 0.8 ATR
+    assert round(p.buy.entry - p.buy.sl, 2) == 8.0
+    assert round(p.buy.tp1 - p.buy.entry, 2) == 12.0 and round(p.buy.tp2 - p.buy.entry, 2) == 24.0
+    assert round(p.sell.sl - p.sell.entry, 2) == 8.0 and round(p.sell.entry - p.sell.tp2, 2) == 24.0
 
 
-def test_context_strong_usd_gives_gold_sell():
-    snap = MacroSnapshot(dxy_1d_pct=0.3, dxy_5d_pct=1.5, us10y_1d_bps=4, us10y_5d_bps=25, gold_5d_pct=-1.0)
-    ctx = build_context(classify("CPI m/m"), 0.4, 0.2, snap, threshold=50)
-    assert ctx.bias == "SELL" and ctx.gold_score <= -50
-    assert any("DXY" in r for r in ctx.reasons)
-
-
-def test_context_weak_usd_and_rising_claims_gives_gold_buy():
-    snap = MacroSnapshot(dxy_1d_pct=-0.4, dxy_5d_pct=-1.6, us10y_1d_bps=-5, us10y_5d_bps=-22, gold_5d_pct=2.0)
-    ctx = build_context(classify("Unemployment Claims"), 240, 220, snap, threshold=50)
-    assert ctx.bias == "BUY" and ctx.gold_score >= 50
-
-
-def test_context_mixed_signals_stay_neutral():
-    snap = MacroSnapshot(None, 0.8, None, -10, None)
-    ctx = build_context(classify("CPI m/m"), 0.3, 0.3, snap, threshold=50)
-    assert ctx.bias == "NEUTRAL"
-
-
-def test_plan_levels_are_symmetric_risk_and_outside_range():
-    p = build_plan(price=4140.0, atr=4.0, range_high=4145.0, range_low=4132.0, bias="NEUTRAL")
-    assert p.primary is None
-    assert p.buy.entry == round(4145.0 + NEWS_SPREAD, 2)
-    assert p.sell.entry == round(4140.0 - 8.0 - NEWS_SPREAD, 2)  # range low is 8 away = the 2 ATR cap
-    assert round(p.buy.entry - p.buy.sl, 2) == 6.0 == round(p.buy.tp1 - p.buy.entry, 2)
-    assert round(p.sell.sl - p.sell.entry, 2) == 6.0 == round(p.sell.entry - p.sell.tp1, 2)
-    assert round(p.buy.tp2 - p.buy.entry, 2) == 12.0
-
-
-def test_plan_minimum_distance_and_primary_side():
-    p = build_plan(price=4140.0, atr=4.0, range_high=4140.5, range_low=4139.5, bias="BUY")
-    assert p.primary == "BUY"
-    assert p.buy.entry == round(4140.0 + 2.0 + NEWS_SPREAD, 2)  # at least 0.5 ATR away
+def test_plan_minimum_distance():
+    p = build_plan(price=4140.0, atr=4.0, range_high=4140.5, range_low=4139.5)
+    assert p.buy.entry == round(4140.0 + 1.2 + NEWS_SPREAD, 2)
+    assert p.sell.entry == round(4140.0 - 1.2 - NEWS_SPREAD, 2)
 
 
 def test_plan_rejects_bad_input():
     with pytest.raises(ValueError):
-        build_plan(4140.0, 0.0, 4141, 4139, "BUY")
+        build_plan(4140.0, 0.0, 4141, 4139)
+
+
+FLAT = (4140.0, 4140.2, 4139.8, 4140.0)
+
+
+def _plan():
+    # buy 4142.5 / sl 4134.5 / tp1 4154.5 / tp2 4166.5 ; sell 4137.5 / sl 4145.5 / tp1 4125.5 / tp2 4113.5
+    return build_plan(price=4140.0, atr=4.0, range_high=4142.0, range_low=4138.0)
+
+
+def test_simulate_full_win_on_buy_side():
+    candles = [(4140, 4143, 4140, 4142.8), (4143, 4155, 4142, 4154), (4154, 4167, 4150, 4166)] + [FLAT] * 120
+    r = simulate(_plan(), candles, slippage=0.5)
+    # entry 4143.0 (with slippage); tp1 4154.5 = +1.4375R, tp2 4166.5 = +2.9375R -> half each
+    assert r == pytest.approx(0.5 * 11.5 / 8 + 0.5 * 23.5 / 8, abs=1e-3)
+
+
+def test_simulate_stop_loss_and_whipsaw():
+    loss = [(4140, 4143, 4140, 4141), (4141, 4141, 4134, 4135)] + [FLAT] * 120
+    assert simulate(_plan(), loss, slippage=0.5) == pytest.approx((4134.5 - 4143.0) / 8, abs=1e-3)
+    whipsaw = [(4140, 4150, 4130, 4140)] + [FLAT] * 120
+    assert simulate(_plan(), whipsaw, slippage=0.5) == pytest.approx(-1.0 - 1.0 / 8, abs=1e-3)
+
+
+def test_simulate_break_even_after_tp1_and_cancel_and_pending():
+    be = [(4137, 4138, 4137, 4137), (4137, 4137, 4125, 4126), (4126, 4146, 4126, 4140)] + [FLAT] * 120
+    # sell filled 4137.0, TP1 4125.5 -> +1.4375R on half, rest stopped at entry -> 0
+    assert simulate(_plan(), be, slippage=0.5) == pytest.approx(0.5 * 11.5 / 8, abs=1e-3)
+    assert simulate(_plan(), [FLAT] * 40, slippage=0.5) == 0.0  # never triggered -> cancelled
+    assert simulate(_plan(), [FLAT] * 10, slippage=0.5) is None  # too early to tell
+
+
+def test_simulate_time_stop_closes_open_trade():
+    candles = [(4140, 4143, 4140, 4143)] + [(4145, 4146, 4144, 4145)] * 119
+    assert simulate(_plan(), candles, slippage=0.5) == pytest.approx((4145 - 4143.0) / 8, abs=1e-3)
+
+
+def test_history_drives_which_releases_get_plans():
+    assert history.is_plannable("Non-Farm Employment Change")
+    assert not history.is_plannable("Unemployment Claims")
+    assert history.reaction("Non-Farm Employment Change")["n"] > 50
 
 
 def _candles(closes):
@@ -101,8 +115,6 @@ def test_indicators():
     assert atr(candles, 14) == pytest.approx(2.0)
     assert atr(candles[:10], 14) is None
     assert recent_range(candles, 4) == (101.0, 99.0)
-    assert pct_change([100.0, 101.0, 102.0], 2) == pytest.approx(2.0)
-    assert pct_change([100.0], 5) is None
 
 
 def test_forexfactory_parsing():

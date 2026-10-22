@@ -1,5 +1,6 @@
 import logging
 from datetime import timedelta
+from html import escape
 
 from aiogram import F, Router, types
 from aiogram.filters import Command, CommandObject
@@ -11,6 +12,7 @@ from app.core.config import settings
 from app.core.db import SessionLocal
 from app.models import Event, EventState, Payment, Plan, User, utcnow
 from app.pipeline import orchestrator
+from app.signals import history
 from app.telegram import texts
 
 logger = logging.getLogger(__name__)
@@ -24,6 +26,7 @@ def main_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text="📅 Yangiliklar", callback_data="events"),
                 InlineKeyboardButton(text="🎯 Reja", callback_data="plan"),
+                InlineKeyboardButton(text="🧾 Natijalar", callback_data="results"),
             ],
             [InlineKeyboardButton(text=f"💎 VIP — {settings.VIP_PRICE_STARS} ⭐", callback_data="vip")],
         ]
@@ -61,7 +64,7 @@ async def _events_text(admin: bool) -> str:
         return "📅 Yaqin 7 kunda AQSH bo'yicha muhim yangilik yo'q."
     lines = ["📅 <b>AQSH yuqori ta'sirli yangiliklari</b>\n"]
     for ev in events:
-        tag = " · reja yo'q (nutq/boshqa)" if ev.state == EventState.SKIPPED else ""
+        tag = " · 🎯 VIP reja" if history.is_plannable(ev.title) else ""
         prefix = f"#{ev.id} " if admin else ""
         lines.append(f"{prefix}{texts.event_line(ev)}{tag}\n")
     return "\n".join(lines)
@@ -96,6 +99,28 @@ async def cmd_plan(message: types.Message):
     await message.answer(await _plan_text(await _user(message.from_user)), reply_markup=main_keyboard())
 
 
+async def _results_text() -> str:
+    async with SessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(Plan, Event).join(Event, Plan.event_id == Event.id)
+                .where(Plan.result_r.is_not(None)).order_by(Event.event_time.desc()).limit(10)
+            )
+        ).all()
+    if not rows:
+        return "🧾 Hali baholangan reja yo'q. Har reja yangilikdan 2 soat o'tib avtomatik hisoblanadi."
+    lines = ["🧾 <b>So'nggi rejalar natijasi</b> (1R = stop-loss masofasi)\n"]
+    for plan, ev in rows:
+        lines.append(f"{texts.tashkent_time(ev.event_time)} · {escape(ev.title)}: <b>{plan.result_r:+.2f}R</b>")
+    lines.append(f"\nJami: <b>{sum(p.result_r for p, _ in rows):+.2f}R</b>")
+    return "\n".join(lines)
+
+
+@router.message(Command("results"))
+async def cmd_results(message: types.Message):
+    await message.answer(await _results_text(), reply_markup=main_keyboard())
+
+
 @router.message(Command("status"))
 async def cmd_status(message: types.Message):
     user = await _user(message.from_user)
@@ -122,11 +147,13 @@ async def cmd_vip(message: types.Message):
     await send_vip_invoice(message.chat.id, message.bot)
 
 
-@router.callback_query(F.data.in_({"events", "plan", "vip"}))
+@router.callback_query(F.data.in_({"events", "plan", "results", "vip"}))
 async def on_button(cb: types.CallbackQuery):
     await cb.answer()
     if cb.data == "vip":
         await send_vip_invoice(cb.message.chat.id, cb.bot)
+    elif cb.data == "results":
+        await cb.message.answer(await _results_text(), reply_markup=main_keyboard())
     elif cb.data == "events":
         await cb.message.answer(await _events_text(cb.from_user.id in settings.admin_ids), reply_markup=main_keyboard())
     else:

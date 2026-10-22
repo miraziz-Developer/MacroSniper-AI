@@ -5,7 +5,8 @@ import pytest
 from app.billing.subscriptions import extend_vip, get_or_create_user
 from app.calendar.forexfactory import CalendarItem
 from app.core.db import SessionLocal
-from app.market.data import LevelsInput, MacroSnapshot
+from app.market.data import LevelsInput
+from app.market.indicators import Candle
 from app.models import Event, EventState, Plan, utcnow
 from app.pipeline import orchestrator, scheduler
 
@@ -34,18 +35,23 @@ def sent(monkeypatch):
     return log
 
 
+NFP = "Non-Farm Employment Change"  # plannable (positive backtest); Unemployment Claims is not
+
+
 @pytest.fixture
 def market(monkeypatch):
-    state = {"levels": LevelsInput(4140.0, 4.0, 4145.0, 4134.0, "test"), "snap": MacroSnapshot(0.2, 1.4, 3, 24, -1.0)}
+    # plan from these levels: BUY STOP 4143.70 / SELL STOP 4136.30, 1R = $8
+    rally = [Candle(i, 4140, 4144 if i == 0 else 4170, 4140, 4144) for i in range(130)]
+    state = {"levels": LevelsInput(4140.0, 4.0, 4145.0, 4134.0, "test"), "minutes": rally}
 
     async def levels_input():
         return state["levels"]
 
-    async def macro_snapshot():
-        return state["snap"]
+    async def minute_candles(source, start, minutes):
+        return state["minutes"]
 
     monkeypatch.setattr(orchestrator.market, "levels_input", levels_input)
-    monkeypatch.setattr(orchestrator.market, "macro_snapshot", macro_snapshot)
+    monkeypatch.setattr(orchestrator.market, "minute_candles", minute_candles)
     return state
 
 
@@ -91,8 +97,9 @@ async def test_sync_keeps_usd_high_plus_plannable_medium(calendar):
 
 async def test_full_lifecycle_sends_each_stage_once(calendar, market, sent):
     await _vip()
-    calendar.append(item("CPI m/m", utcnow() + timedelta(hours=2)))
+    calendar.append(item(NFP, utcnow() + timedelta(hours=2)))
     (ref,) = await orchestrator.sync_calendar()
+    assert ref.plannable
 
     assert await orchestrator.run_context(ref.id)
     assert not await orchestrator.run_context(ref.id)
@@ -100,20 +107,46 @@ async def test_full_lifecycle_sends_each_stage_once(calendar, market, sent):
     assert not await orchestrator.run_plan(ref.id)
     assert await orchestrator.resolve_event(ref.id, 0.5, "test")
     assert not await orchestrator.resolve_event(ref.id, 0.6, "test")
+    assert await orchestrator.run_review(ref.id)
+    assert not await orchestrator.run_review(ref.id)
 
-    assert len(sent["vip"]) == 3 and all(ids == [555] for ids, _ in sent["vip"])
-    assert "kontekst" in sent["vip"][0][1] and "SAVDO REJASI" in sent["vip"][1][1] and "NATIJA" in sent["vip"][2][1]
-    assert len(sent["channel"]) == 2  # teaser + public outcome
+    texts_sent = [text for _, text in sent["vip"]]
+    assert len(texts_sent) == 4 and all(ids == [555] for ids, _ in sent["vip"])
+    assert "3 soat qoldi" in texts_sent[0] and "Tarix" in texts_sent[0]
+    assert "SAVDO REJASI" in texts_sent[1] and "NATIJA CHIQDI" in texts_sent[2] and "REJA NATIJASI" in texts_sent[3]
+    assert len(sent["channel"]) == 3  # teaser + public outcome + public review
     async with SessionLocal() as s:
         ev = await s.get(Event, ref.id)
-        assert ev.state == EventState.RESOLVED and ev.outcome == "SELL" and ev.context_bias == "SELL"
+        assert ev.state == EventState.RESOLVED and ev.outcome == "SELL"
         plan = (await s.execute(Plan.__table__.select())).one()
-        assert plan.primary == "SELL"
+        assert plan.result_r > 2  # TP1 and TP2 both hit in the rally
+
+
+async def test_unplannable_release_gets_no_preview_or_plan(calendar, market, sent):
+    await _vip()
+    calendar.append(item("Unemployment Claims", utcnow() + timedelta(hours=2)))
+    (ref,) = await orchestrator.sync_calendar()
+    assert not ref.plannable
+    assert not await orchestrator.run_context(ref.id) and not await orchestrator.run_plan(ref.id)
+    assert sent["vip"] == []
+
+
+async def test_review_waits_for_enough_candles(calendar, market, sent):
+    await _vip()
+    calendar.append(item(NFP, utcnow() + timedelta(minutes=30)))
+    (ref,) = await orchestrator.sync_calendar()
+    assert await orchestrator.run_plan(ref.id)
+    market["minutes"] = [Candle(i, 4140, 4140.2, 4139.8, 4140) for i in range(10)]
+    assert not await orchestrator.run_review(ref.id)  # undecided: retried by the next sync
+    market["minutes"] = [Candle(i, 4140, 4140.2, 4139.8, 4140) for i in range(40)]
+    assert await orchestrator.run_review(ref.id)
+    async with SessionLocal() as s:
+        assert (await s.execute(Plan.__table__.select())).one().result_r == 0.0  # never triggered
 
 
 async def test_plan_is_not_sent_without_market_data(calendar, market, sent):
     await _vip()
-    calendar.append(item("CPI m/m", utcnow() + timedelta(minutes=30)))
+    calendar.append(item(NFP, utcnow() + timedelta(minutes=30)))
     (ref,) = await orchestrator.sync_calendar()
     market["levels"] = None
     assert not await orchestrator.run_plan(ref.id)
@@ -123,14 +156,14 @@ async def test_plan_is_not_sent_without_market_data(calendar, market, sent):
 
 
 async def test_plan_never_runs_after_release(calendar, market, sent):
-    calendar.append(item("CPI m/m", utcnow() - timedelta(minutes=1)))
+    calendar.append(item(NFP, utcnow() - timedelta(minutes=1)))
     (ref,) = await orchestrator.sync_calendar()
     assert not await orchestrator.run_plan(ref.id)
     assert sent["vip"] == []
 
 
 async def test_poll_without_fmp_reminds_admin_once(calendar, sent):
-    calendar.append(item("CPI m/m", utcnow() - timedelta(seconds=30)))
+    calendar.append(item(NFP, utcnow() - timedelta(seconds=30)))
     (ref,) = await orchestrator.sync_calendar()
     await orchestrator.poll_actual(ref.id)
     await orchestrator.poll_actual(ref.id)
@@ -139,16 +172,24 @@ async def test_poll_without_fmp_reminds_admin_once(calendar, sent):
 
 def test_stage_times():
     t = datetime(2026, 10, 22, 12, 30, tzinfo=timezone.utc)
-    early = scheduler.stage_times(t, EventState.SCHEDULED, t - timedelta(hours=5))
-    assert early == {"context": t - timedelta(hours=3), "plan": t - timedelta(minutes=2), "poll": t + timedelta(seconds=20)}
+    review_at = t + timedelta(minutes=125)
+    early = scheduler.stage_times(t, EventState.SCHEDULED, True, t - timedelta(hours=5))
+    assert early == {
+        "context": t - timedelta(hours=3),
+        "plan": t - timedelta(minutes=2),
+        "poll": t + timedelta(seconds=20),
+        "review": review_at,
+    }
+    assert scheduler.stage_times(t, EventState.SCHEDULED, False, t - timedelta(hours=5)) == {}
 
-    late_now = t - timedelta(hours=1)  # restarted inside the window: catch up context immediately
-    assert scheduler.stage_times(t, EventState.SCHEDULED, late_now)["context"] == late_now
+    late_now = t - timedelta(hours=1)  # restarted inside the window: catch up the preview immediately
+    assert scheduler.stage_times(t, EventState.SCHEDULED, True, late_now)["context"] == late_now
 
-    after = scheduler.stage_times(t, EventState.PLAN_SENT, t + timedelta(minutes=1))
-    assert set(after) == {"poll"}
-    assert scheduler.stage_times(t, EventState.PLAN_SENT, t + timedelta(hours=1)) == {}
-    assert "context" not in scheduler.stage_times(t, EventState.SCHEDULED, t - timedelta(minutes=1))
+    after = scheduler.stage_times(t, EventState.PLAN_SENT, True, t + timedelta(minutes=1))
+    assert set(after) == {"poll", "review"}
+    resolved = scheduler.stage_times(t, EventState.RESOLVED, True, t + timedelta(hours=3))
+    assert resolved == {"review": t + timedelta(hours=3)}  # overdue review runs now
+    assert scheduler.stage_times(t, EventState.RESOLVED, True, t + timedelta(days=2)) == {}
 
 
 async def test_keep_awake_pings_public_health(monkeypatch):

@@ -73,3 +73,17 @@ async def test_get_or_create_user_is_stable():
         a = await get_or_create_user(s, 1)
         b = await get_or_create_user(s, 1)
         assert a.id == b.id
+
+
+async def test_init_db_adds_new_nullable_columns_to_existing_tables():
+    # Simulates the live Neon DB created before plans.result_r existed
+    from sqlalchemy import inspect, text
+
+    from app.core.db import engine, init_db
+
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE plans DROP COLUMN result_r"))
+    await init_db()
+    async with engine.connect() as conn:
+        cols = await conn.run_sync(lambda c: {col["name"] for col in inspect(c).get_columns("plans")})
+    assert "result_r" in cols

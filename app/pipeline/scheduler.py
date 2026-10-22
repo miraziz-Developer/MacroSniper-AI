@@ -16,26 +16,37 @@ scheduler = AsyncIOScheduler(timezone="UTC")
 CONTEXT_BEFORE = timedelta(hours=3)
 PLAN_BEFORE = timedelta(minutes=2)
 POLL_AFTER = timedelta(seconds=20)
+REVIEW_AFTER = timedelta(minutes=orchestrator.REVIEW_MINUTES + 5)
+REVIEW_UNTIL = timedelta(days=1)
 
 
-def stage_times(event_time: datetime, state: EventState, now: datetime) -> Dict[str, datetime]:
+def stage_times(event_time: datetime, state: EventState, plannable: bool, now: datetime) -> Dict[str, datetime]:
     """When each remaining stage should run; overdue stages run now while they still make sense."""
+    if not plannable:
+        return {}
     plan_at, poll_at = event_time - PLAN_BEFORE, event_time + POLL_AFTER
     times: Dict[str, datetime] = {}
     if state == EventState.SCHEDULED and now < plan_at:
         times["context"] = max(event_time - CONTEXT_BEFORE, now)
     if state in (EventState.SCHEDULED, EventState.CONTEXT_READY) and now < event_time:
         times["plan"] = max(plan_at, now)
-    if now < event_time + orchestrator.POLL_WINDOW:
+    if state != EventState.RESOLVED and now < event_time + orchestrator.POLL_WINDOW:
         times["poll"] = max(poll_at, now)
+    if now < event_time + REVIEW_UNTIL:  # retried by each re-sync until candles are available
+        times["review"] = max(event_time + REVIEW_AFTER, now)
     return times
 
 
-_JOBS = {"context": orchestrator.run_context, "plan": orchestrator.run_plan, "poll": orchestrator.poll_actual}
+_JOBS = {
+    "context": orchestrator.run_context,
+    "plan": orchestrator.run_plan,
+    "poll": orchestrator.poll_actual,
+    "review": orchestrator.run_review,
+}
 
 
 def schedule_event(ref: orchestrator.EventRef, now: Optional[datetime] = None) -> None:
-    for stage, run_at in stage_times(ref.event_time, ref.state, now or utcnow()).items():
+    for stage, run_at in stage_times(ref.event_time, ref.state, ref.plannable, now or utcnow()).items():
         # Re-adding is safe: same id replaces the job and stages are idempotent in the DB
         scheduler.add_job(
             _JOBS[stage],

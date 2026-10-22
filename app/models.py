@@ -2,7 +2,7 @@ import enum
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import BigInteger, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, DateTime, Enum, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
@@ -32,7 +32,7 @@ class UTCDateTime(TypeDecorator):
 
 class EventState(str, enum.Enum):
     SCHEDULED = "SCHEDULED"  # from calendar, nothing done yet
-    CONTEXT_READY = "CONTEXT_READY"  # T-3h market context computed
+    CONTEXT_READY = "CONTEXT_READY"  # T-3h preview (historical scenarios) sent
     PLAN_SENT = "PLAN_SENT"  # T-2m trade plan delivered
     RESOLVED = "RESOLVED"  # actual received, outcome published
     SKIPPED = "SKIPPED"  # not a numeric release we can plan (e.g. speeches)
@@ -53,9 +53,6 @@ class Event(Base):
     unit: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
     state: Mapped[EventState] = mapped_column(Enum(EventState, native_enum=False), default=EventState.SCHEDULED)
 
-    context_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # gold score, -100..100
-    context_bias: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)  # BUY / SELL / NEUTRAL
-    context_reasons: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # newline-separated
     outcome: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)  # BUY / SELL / INLINE
 
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
@@ -81,8 +78,8 @@ class Plan(Base):
     sell_sl: Mapped[float] = mapped_column(Float)
     sell_tp1: Mapped[float] = mapped_column(Float)
     sell_tp2: Mapped[float] = mapped_column(Float)
-    primary: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)  # BUY / SELL / None
     price_source: Mapped[str] = mapped_column(String(32))
+    result_r: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # filled by the T+2h review
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 

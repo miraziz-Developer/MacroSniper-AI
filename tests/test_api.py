@@ -2,6 +2,7 @@ from datetime import timedelta
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
 from app.billing.subscriptions import extend_vip, get_or_create_user
 from app.core.config import settings
@@ -28,12 +29,13 @@ async def client(monkeypatch):
 
 async def _event_with_plan() -> int:
     async with SessionLocal() as s:
-        ev = Event(external_id="e1", title="CPI m/m", event_time=utcnow() + timedelta(minutes=1), state=EventState.PLAN_SENT)
+        ev = Event(external_id="e1", title="Non-Farm Employment Change", event_time=utcnow() + timedelta(minutes=1),
+                   state=EventState.PLAN_SENT)
         s.add(ev)
         await s.flush()
         s.add(Plan(event_id=ev.id, price=4140, atr=4, range_high=4145, range_low=4134, buy_entry=4145.5, buy_sl=4139.5,
                    buy_tp1=4151.5, buy_tp2=4157.5, sell_entry=4133.5, sell_sl=4139.5, sell_tp1=4127.5, sell_tp2=4121.5,
-                   primary=None, price_source="test"))
+                   price_source="test"))
         await s.commit()
         return ev.id
 
@@ -52,7 +54,10 @@ async def test_plan_hidden_from_guests_and_free_users(client):
     await _event_with_plan()
     guest = (await client.get("/api/app/state")).json()
     assert guest["plan"] is None and guest["plan_exists"] and not guest["user"]["verified"]
-    assert guest["focus"]["title"] == "CPI m/m" and guest["focus"]["event_time"].endswith("+00:00")
+    focus = guest["focus"]
+    assert focus["title"] == "Non-Farm Employment Change" and focus["event_time"].endswith("+00:00")
+    assert focus["plannable"] and focus["scenario"]["higher_gold"] == "SELL" and focus["scenario"]["straddle"]["trades"] > 0
+    assert guest["track_record"] == {"plans": [], "total_r": 0}
 
     free = (await client.get("/api/app/state", headers={"X-Telegram-Init-Data": signed_init_data(42)})).json()
     assert free["user"]["verified"] and not free["user"]["is_vip"] and free["plan"] is None
@@ -92,3 +97,13 @@ async def test_admin_actual_resolves_once(client, monkeypatch):
     assert (await client.post(f"/api/admin/events/{event_id}/actual", headers=ADMIN, json={"value": 0.5})).status_code == 409
     events = (await client.get("/api/events")).json()
     assert events[0]["state"] == "RESOLVED"
+
+
+async def test_track_record_is_public(client):
+    event_id = await _event_with_plan()
+    async with SessionLocal() as s:
+        plan = (await s.execute(select(Plan).where(Plan.event_id == event_id))).scalar_one()
+        plan.result_r = 1.25
+        await s.commit()
+    tr = (await client.get("/api/app/state")).json()["track_record"]
+    assert tr["total_r"] == 1.25 and tr["plans"][0]["title"] == "Non-Farm Employment Change"

@@ -1,0 +1,73 @@
+{
+  "generated_from": "2012-01 – 2025-04",
+  "reaction": {
+    "ADP Non-Farm Employment Change": {
+      "n": 155,
+      "against_1m": 0.877,
+      "against_15m": 0.723,
+      "median_move_15m": 1.99
+    },
+    "Unemployment Claims": {
+      "n": 512,
+      "against_1m": 0.762,
+      "against_15m": 0.619,
+      "median_move_15m": 1.61
+    },
+    "Core PCE Price Index m/m": {
+      "n": 70,
+      "against_1m": 0.729,
+      "against_15m": 0.486,
+      "median_move_15m": 2.23
+    },
+    "CPI m/m": {
+      "n": 133,
+      "against_1m": 0.805,
+      "against_15m": 0.647,
+      "median_move_15m": 3.31
+    },
+    "ISM Manufacturing PMI": {
+      "n": 156,
+      "against_1m": 0.814,
+      "against_15m": 0.679,
+      "median_move_15m": 2.25
+    },
+    "ISM Services PMI": {
+      "n": 157,
+      "against_1m": 0.764,
+      "against_15m": 0.707,
+      "median_move_15m": 2.17
+    },
+    "Non-Farm Employment Change": {
+      "n": 123,
+      "against_1m": 0.837,
+      "against_15m": 0.797,
+      "median_move_15m": 6.06
+    },
+    "PPI m/m": {
+      "n": 104,
+      "against_1m": 0.817,
+      "against_15m": 0.654,
+      "median_move_15m": 1.58
+    },
+    "Retail Sales m/m": {
+      "n": 139,
+      "against_1m": 0.777,
+      "against_15m": 0.633,
+      "median_move_15m": 2.3
+    }
+  },
+  "straddle": {
+    "Non-Farm Employment Change": {
+      "trades": 155,
+      "win": 0.69,
+      "exp_r": 0.665,
+      "total_r": 103.138
+    },
+    "CPI m/m": {
+      "trades": 147,
+      "win": 0.497,
+      "exp_r": 0.103,
+      "total_r": 15.114
+    }
+  }
+}

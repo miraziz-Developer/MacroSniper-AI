@@ -6,24 +6,34 @@ orqali VIP obunachilarga beradi. To'lov — Telegram Stars. Batafsil dizayn: [do
 
 ## Qanday ishlaydi
 
+Hammasi 2012–2025 tarixida walk-forward usulida tekshirilgan: [research/REPORT.md](research/REPORT.md).
+
 ```
-ForexFactory (har 10 daq) ─► Event SCHEDULED
-   T-3h  ─► Kontekst: DXY, US10Y (Yahoo) + prognoz/avvalgi  ─► VIP'larga "3 soat qoldi"
-   T-2m  ─► Reja: 15m ATR(14) + 4 soatlik diapazon (Binance PAXG / COMEX) ─► BUY STOP + SELL STOP
-   T+20s ─► Fakt: FMP (kalit bo'lsa) yoki admin /actual ─► qaysi order qoladi ─► VIP + kanal
+ForexFactory (har 10 daq, GitHub mirror zaxira) ─► Event
+   T-3h  ─► Preview: "fakt yuqori → oltin X% hollarda tushgan" + rejaning tarixiy natijasi
+   T-2m  ─► Reja: 15m ATR + 4 soatlik diapazon ─► BUY STOP / SELL STOP (OCO)
+   T+20s ─► Fakt: FMP (kalit bo'lsa) yoki admin /actual ─► kutilgan yo'nalish + tarixiy %
+   T+2h  ─► Hisob: reja 1 daqiqalik shamlar bo'yicha baholanadi (R), /results va Mini App'da ochiq
 ```
 
-- Har bosqich DB'da bir marta belgilanadi (`event_stages`) — restartdan keyin ham xabar takrorlanmaydi.
-- Narx ma'lumoti olinmasa reja **yuborilmaydi**, adminga ogohlantirish ketadi (soxta raqam yo'q).
-- Yo'nalish faqat kontekst balli |50| dan yuqori bo'lsa aytiladi, aks holda "faqat breakout".
-- Barcha USD "High" va rejalashtiriladigan "Medium" relizlar (Claims, PMI…) olinadi.
-- Nutqlar (Powell Speaks va h.k.) kalendarda ko'rinadi, lekin reja tuzilmaydi.
+- Yangilikdan **oldin** yo'nalishni hech kim aniq bilmaydi — tarix buni tasdiqlaydi (~52%), shuning
+  uchun tizim yo'nalish foizini to'qib chiqarmaydi, faqat tekshirilgan ssenariy ehtimollarini beradi.
+- Reja faqat tarixda foyda bergan yangiliklarga beriladi (hozir NFP va CPI).
+- Har bosqich DB'da bir marta belgilanadi — restartdan keyin xabar takrorlanmaydi.
+- Narx ma'lumoti olinmasa reja **yuborilmaydi** (soxta raqam yo'q).
+
+Tadqiqotni qayta ishga tushirish (ma'lumotlar repoga kirmaydi):
+
+```bash
+pip install pandas numpy httpx
+PYTHONPATH=. python research/analyze.py DATA_DIR   # REPORT.md va app/signals/stats.json yangilanadi
+```
 
 ## Bot buyruqlari
 
 | Hamma | Admin (`TELEGRAM_ADMIN_IDS`) |
 |---|---|
-| `/start` `/events` `/plan` `/status` `/vip` `/paysupport` | `/stats` · `/grant ID KUN` · `/revoke ID` · `/actual EVENT_ID QIYMAT` (ID'lar `/events` da) |
+| `/start` `/events` `/plan` `/results` `/status` `/vip` `/paysupport` | `/stats` · `/grant ID KUN` · `/revoke ID` · `/actual EVENT_ID QIYMAT` (ID'lar `/events` da) |
 
 ## Lokal ishga tushirish
 
