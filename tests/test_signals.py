@@ -200,3 +200,15 @@ async def test_gold_feed_falls_back_binance_kraken_comex(monkeypatch):
     up["kraken"] = False
     monkeypatch.setattr(data, "_cache", {})
     assert (await data.gold_candles_15m())[1] == data.COMEX
+
+
+def test_live_odds_follow_surprise_then_price():
+    nfp = "Non-Farm Employment Change"
+    big, small = history.odds(nfp, 228, 137), history.odds(nfp, 140, 137)
+    assert big["side"] == "SELL" and big["basis"] == "surprise" and big["p"] >= small["p"] > 0.5
+    confirming = history.odds(nfp, 228, 137, minutes=5, p0=3100, price=3090, atr=5)  # fell 2 ATR
+    against = history.odds(nfp, 228, 137, minutes=5, p0=3100, price=3106, atr=5)  # rose 1.2 ATR
+    assert confirming["basis"] == "price" and confirming["p"] > big["p"] and against["p"] < 0.3
+    assert history.odds("Unemployment Claims", 240, 225)["side"] == "BUY"  # more claims -> weaker USD
+    assert history.odds("CPI m/m", 0.3, 0.3) == {"side": None, "p": 0.5, "basis": "inline", "size": None}
+    assert history.odds("FOMC Member Speaks", 1, 2) is None and history.odds(nfp, None, 137) is None

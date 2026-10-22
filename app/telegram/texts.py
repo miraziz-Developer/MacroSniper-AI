@@ -95,12 +95,12 @@ def plan_message(ev: Event, plan: Plan) -> str:
 
 
 def outcome_message(ev: Event) -> str:
-    stats = history.reaction(ev.title)
     if ev.outcome == "INLINE":
         action = "Fakt prognozga teng — kuchli impuls kutilmaydi."
     else:
-        odds = f" Tarixda bu {_pct(stats['against_1m'])} hollarda to'g'ri chiqqan." if stats else ""
-        action = f"Kutilgan yo'nalish: {SIDE_UZ[ev.outcome]}.{odds}"
+        odds = history.odds(ev.title, ev.actual, ev.forecast)
+        size = {0: "kichik", 1: "o'rta", 2: "katta"}.get(odds["size"]) if odds else None
+        action = f"Kutilgan yo'nalish: {SIDE_UZ[ev.outcome]}." + (f" Syurpriz: {size}.\n{odds_line(odds)}" if odds else "")
     return f"⚡ <b>NATIJA CHIQDI</b>\n\n{event_line(ev)}\nFakt: <b>{_fmt(ev.actual, ev.unit)}</b>\n\n{action}"
 
 
@@ -118,9 +118,17 @@ def review_message(ev: Event, plan: Plan) -> str:
     )
 
 
-def live_message(ev: Event, st: Status) -> str:
+def odds_line(odds: Optional[dict]) -> str:
+    """'SELL 86%' with what it is based on; empty when the release cannot be scored yet."""
+    if not odds or not odds["side"]:
+        return ""
+    basis = {"surprise": "syurpriz kattaligi", "price": "narx harakati"}[odds["basis"]]
+    return f"📊 <b>{odds['side']} {odds['p'] * 100:.0f}%</b> — 15 daqiqada shu tomonda bo'lish ehtimoli ({basis}, 2012–2025)\n"
+
+
+def live_message(ev: Event, st: Status, odds: Optional[dict] = None) -> str:
     name = "BUY" if st.side == 1 else "SELL"
-    head = f"📡 <b>{escape(ev.title)}</b> · jonli\n"
+    head = f"📡 <b>{escape(ev.title)}</b> · jonli\n{odds_line(odds)}"
     if st.phase == "open":
         return (
             f"{head}⚡ <b>{name} STOP ochildi</b> @ <code>{st.entry:.2f}</code> — qarshi orderni bekor qiling.\n"

@@ -128,3 +128,12 @@ async def test_live_endpoint_is_vip_only(client, monkeypatch):
     monkeypatch.setattr(routes.orchestrator.market, "minute_candles", minute_candles)
     live = (await client.get("/api/app/live", headers=free)).json()
     assert live["phase"] == "open" and live["side"] == 1 and live["price"] == 4146
+    assert live["odds"] is None  # no actual yet
+
+    async with SessionLocal() as s:
+        ev = await s.get(Event, event_id)
+        ev.actual, ev.forecast = 60.0, 200.0  # NFP far below forecast -> gold BUY
+        await s.commit()
+    routes.market._cache.clear()
+    odds = (await client.get("/api/app/live", headers=free)).json()["odds"]
+    assert odds["side"] == "BUY" and 0.5 < odds["p"] < 1

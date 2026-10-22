@@ -307,8 +307,10 @@ def main(data_dir: str) -> None:
     for primary in PLAN_SERIES:
         r = backtest(slots[slots.primary == primary], production, 0.5)
         stats["straddle"][title_of[primary]] = {k: round(r[k], 3) for k in ("trades", "win", "exp_r", "total_r")}
-    with open("app/signals/stats.json", "w") as f:
-        json.dump(stats, f, indent=2, ensure_ascii=False)
+    path = "app/signals/stats.json"
+    merged = {**json.load(open(path)), **stats}  # keep the live tables written by research/fundamental.py
+    with open(path, "w") as f:
+        json.dump(merged, f, indent=2, ensure_ascii=False)
 
     out = "research/REPORT.md"
     with open(out, "w") as f:

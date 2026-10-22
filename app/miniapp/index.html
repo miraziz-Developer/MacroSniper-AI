@@ -247,7 +247,14 @@ async function pollLive() {
     const l = await api('/api/app/live');
     if (!l.active) { box.style.display = 'none'; return; }
     box.style.display = '';
-    box.innerHTML = `<div class="muted">📡 Jonli holat (har 1.5 soniyada)</div><div style="margin-top:6px">${(LIVE_TEXT[l.phase] || (() => esc(l.phase)))(l)}</div>`;
+    const o = l.odds;
+    const oddsHtml = o && o.side
+      ? `<div class="row" style="margin-top:8px"><span class="pill ${o.side}" style="font-size:16px">${o.side} ${Math.round(o.p * 100)}%</span>
+           <span class="muted">${o.basis === 'price' ? 'narx harakati' : 'syurpriz kattaligi'} · 15 daq</span></div>
+         <div style="height:6px;border-radius:3px;background:var(--line);margin-top:6px">
+           <div style="height:6px;border-radius:3px;width:${Math.round(o.p * 100)}%;background:${o.side === 'BUY' ? 'var(--buy)' : 'var(--sell)'}"></div></div>`
+      : (l.phase === 'pending' ? '' : '<div class="muted" style="margin-top:8px">Fakt kutilmoqda — foiz fakt chiqqach hisoblanadi.</div>');
+    box.innerHTML = `<div class="muted">📡 Jonli holat (har 1.5 soniyada)</div>${oddsHtml}<div style="margin-top:6px">${(LIVE_TEXT[l.phase] || (() => esc(l.phase)))(l)}</div>`;
   } catch (e) { /* keep last view */ }
 }
 

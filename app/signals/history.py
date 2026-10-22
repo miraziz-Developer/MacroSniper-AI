@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Optional
 
+from app.signals.rules import classify
+
 _STATS = json.loads((Path(__file__).with_name("stats.json")).read_text(encoding="utf-8"))
 
 PERIOD: str = _STATS["generated_from"]
@@ -23,3 +25,43 @@ def is_plannable(title: str) -> bool:
     """Only releases where the straddle had a positive expectancy in the backtest get a trade plan."""
     stats = straddle(title)
     return bool(stats and stats["exp_r"] > 0)
+
+
+def _bucket(value: float, edges) -> int:
+    return sum(value >= e for e in edges)
+
+
+def odds(
+    title: str,
+    actual: Optional[float],
+    forecast: Optional[float],
+    minutes: float = 0.0,
+    p0: Optional[float] = None,
+    price: Optional[float] = None,
+    atr: Optional[float] = None,
+) -> Optional[dict]:
+    """Live probability that gold sits on the surprise-implied side 15 minutes after the release.
+
+    At the release it comes from the surprise size; from minute 1 on, from how far price has already
+    moved that way (both tables are 2012–2025 history, see research/FUNDAMENTAL.md).
+    Returns {side, p, basis, size} or None when the release cannot be scored.
+    """
+    kind, scale, by_size = classify(title), _STATS["surprise_scale"].get(title), _STATS["odds_by_size"].get(title)
+    if kind is None or actual is None or forecast is None or not scale or not by_size:
+        return None
+    surprise = actual - forecast
+    if abs(surprise) < 1e-9:
+        return {"side": None, "p": 0.5, "basis": "inline", "size": None}
+    usd_up = (surprise > 0) == kind.usd_up_when_higher
+    side = "SELL" if usd_up else "BUY"
+    grid = _STATS["live_grid"]
+    size = _bucket(abs(surprise) / scale, grid["size_edges"])
+    cell = by_size.get(str(size)) or by_size[max(by_size, key=lambda k: by_size[k]["n"])]
+    result = {"side": side, "p": cell["p15"], "basis": "surprise", "size": size}
+    if minutes >= 1 and None not in (p0, price, atr) and atr > 0:
+        k = max(m for m in grid["minutes"] if m <= minutes)
+        move = (price - p0) * (1 if side == "BUY" else -1) / atr
+        live = _STATS["live_odds"].get(f"{k}:{_bucket(move, grid['move_edges_atr'])}")
+        if live:
+            result.update(p=live["p15"], basis="price")
+    return result
