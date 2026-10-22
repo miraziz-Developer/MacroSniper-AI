@@ -176,6 +176,39 @@ async def resolve_event(event_id: int, actual: float, source: str) -> bool:
     return True
 
 
+BLS_INTERVAL_KEYED, BLS_INTERVAL_FREE = 1.5, 5.0
+BLS_MAX_IN_FLIGHT = 3
+
+
+async def _race_bls(title: str, event_time: datetime) -> Optional[float]:
+    """Fire a BLS request every interval without waiting for slow ones; first new print wins.
+
+    Keyless BLS allows 25 calls/day: 5 s spacing over a 100 s window stays at ~20.
+    """
+    interval, window = (BLS_INTERVAL_KEYED, 180) if settings.BLS_API_KEY else (BLS_INTERVAL_FREE, 100)
+    deadline = event_time + timedelta(seconds=window)
+    pending: set = set()
+    last_launch = None
+    try:
+        while utcnow() < deadline:
+            now = asyncio.get_running_loop().time()
+            if len(pending) < BLS_MAX_IN_FLIGHT and (last_launch is None or now - last_launch >= interval):
+                pending.add(asyncio.create_task(actuals.fetch_bls_actual(title, event_time.date())))
+                last_launch = now
+            wait_for = max(0.01, interval - (asyncio.get_running_loop().time() - last_launch))
+            if not pending:
+                await asyncio.sleep(wait_for)
+                continue
+            done, pending = await asyncio.wait(pending, timeout=wait_for, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                if task.result() is not None:
+                    return task.result()
+        return None
+    finally:
+        for task in pending:
+            task.cancel()
+
+
 async def poll_actual(event_id: int) -> None:
     if event_id in _polled:
         return
@@ -187,6 +220,11 @@ async def poll_actual(event_id: int) -> None:
         title, event_time, previous = ev.title, ev.event_time, ev.previous
 
     reminder = f"✍️ {escape(title)} chiqdi. Faktni kiriting: <code>/actual {event_id} QIYMAT</code>"
+    if title in actuals.BLS_SERIES:
+        value = await _race_bls(title, event_time)
+        if value is not None:
+            await resolve_event(event_id, value, "BLS")
+            return
     if not settings.FMP_API_KEY:
         await notifier.send_admins(reminder)
         return

@@ -164,7 +164,7 @@ async def test_plan_never_runs_after_release(calendar, market, sent):
 
 
 async def test_poll_without_fmp_reminds_admin_once(calendar, sent):
-    calendar.append(item(NFP, utcnow() - timedelta(seconds=30)))
+    calendar.append(item(NFP, utcnow() - timedelta(minutes=3)))  # past the BLS polling window
     (ref,) = await orchestrator.sync_calendar()
     await orchestrator.poll_actual(ref.id)
     await orchestrator.poll_actual(ref.id)
@@ -178,7 +178,7 @@ def test_stage_times():
     assert early == {
         "context": t - timedelta(hours=2),
         "plan": t - timedelta(minutes=2),
-        "poll": t + timedelta(seconds=20),
+        "poll": t,
         "review": review_at,
         "live": t - timedelta(seconds=30),
     }
@@ -247,3 +247,50 @@ async def test_live_monitor_pushes_each_phase_once(calendar, market, sent, monke
     frames[:] = [frames[-1]]
     await orchestrator.run_live(ref.id)
     assert len(sent["vip"]) == 3
+
+
+async def test_poll_resolves_from_bls_within_seconds(calendar, market, sent, monkeypatch):
+    await _vip()
+    calendar.append(item(NFP, utcnow() + timedelta(minutes=30)))
+    (ref,) = await orchestrator.sync_calendar()
+    assert await orchestrator.run_plan(ref.id)
+    async with SessionLocal() as s:
+        ev = await s.get(Event, ref.id)
+        ev.event_time = utcnow() - timedelta(seconds=2)
+        await s.commit()
+    calls = []
+
+    async def fetch_bls_actual(title, release_day):
+        calls.append(title)
+        return None if len(calls) < 2 else 0.6  # first poll: still last month; second: new print
+
+    async def no_sleep(_):
+        return None
+
+    monkeypatch.setattr(orchestrator.actuals, "fetch_bls_actual", fetch_bls_actual)
+    monkeypatch.setattr(orchestrator.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(orchestrator, "BLS_INTERVAL_FREE", 0.01)
+    orchestrator._polled.discard(ref.id)
+    await orchestrator.poll_actual(ref.id)
+    async with SessionLocal() as s:
+        ev = await s.get(Event, ref.id)
+        assert ev.actual == 0.6 and ev.state == EventState.RESOLVED and ev.outcome == "SELL"
+    assert len(calls) == 2 and "BLS" in sent["admin"][-1] and sent["admin"][-1].startswith("✅")
+
+
+async def test_slow_bls_request_does_not_block_a_fast_one(monkeypatch):
+    import asyncio
+
+    hang = asyncio.Event()  # never set: the first request stalls like BLS sometimes does
+    calls = []
+
+    async def fetch_bls_actual(title, release_day):
+        calls.append(1)
+        if len(calls) == 1:
+            await hang.wait()
+        return 29.0
+
+    monkeypatch.setattr(orchestrator.actuals, "fetch_bls_actual", fetch_bls_actual)
+    monkeypatch.setattr(orchestrator, "BLS_INTERVAL_FREE", 0.01)
+    assert await orchestrator._race_bls(NFP, utcnow()) == 29.0
+    assert len(calls) == 2
