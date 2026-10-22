@@ -98,7 +98,7 @@ async def sync_calendar() -> List[EventRef]:
 
 
 async def run_context(event_id: int) -> bool:
-    """T-3h preview for plannable releases: historical scenarios, no direction claims."""
+    """T-2h preview for plannable releases: historical scenarios, no direction claims."""
     async with SessionLocal() as session:
         ev = await session.get(Event, event_id)
         if ev is None or ev.state != EventState.SCHEDULED or not history.is_plannable(ev.title):

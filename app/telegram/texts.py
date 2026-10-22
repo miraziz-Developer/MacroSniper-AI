@@ -61,16 +61,21 @@ def straddle_record(title: str) -> str:
 
 def preview_message(ev: Event) -> str:
     return (
-        f"🧭 <b>3 soat qoldi</b>\n\n{event_line(ev)}\n\n"
+        f"🧭 <b>2 soat qoldi</b>\n\n{event_line(ev)}\n\n"
         f"Yo'nalishni oldindan hech kim aniq bilmaydi — natija faktga bog'liq.\n{scenarios(ev.title)}\n\n"
         f"{straddle_record(ev.title)}\nBUY STOP / SELL STOP rejasi yangilikdan 2 daqiqa oldin keladi."
     )
 
 
+def _pips(dollars: float) -> str:
+    return f"{abs(dollars) * 10:.0f} pips"  # XAUUSD: $1 = 10 pips
+
+
 def _side_block(title: str, entry: float, sl: float, tp1: float, tp2: float, price: float) -> str:
     return (
-        f"<b>{title}</b> <code>{entry:.2f}</code> (narxdan {entry - price:+.2f}$)\n"
-        f"   SL <code>{sl:.2f}</code> · TP1 <code>{tp1:.2f}</code> · TP2 <code>{tp2:.2f}</code>"
+        f"<b>{title}</b> <code>{entry:.2f}</code> (narxdan {entry - price:+.2f}$ = {_pips(entry - price)})\n"
+        f"   SL <code>{sl:.2f}</code> ({_pips(entry - sl)}) · TP1 <code>{tp1:.2f}</code> ({_pips(tp1 - entry)})"
+        f" · TP2 <code>{tp2:.2f}</code> ({_pips(tp2 - entry)})"
     )
 
 
@@ -122,7 +127,7 @@ def welcome_message(first_name: str, is_vip: bool, vip_until: Optional[datetime]
         f"Assalomu alaykum, <b>{escape(first_name)}</b>!\n\n"
         f"<b>MacroSniper</b> — AQSH makro yangiliklari paytida XAUUSD uchun 2012–2025 yillar tarixida "
         f"sinalgan savdo rejalari:\n"
-        f"• 3 soat oldin — fakt yuqori/past chiqsa oltin qayerga ketgani (tarixiy %)\n"
+        f"• 2 soat oldin — fakt yuqori/past chiqsa oltin qayerga ketgani (tarixiy %)\n"
         f"• 2 daqiqa oldin — ATR va diapazon asosida BUY STOP / SELL STOP (faqat tarixda foyda bergan yangiliklarda)\n"
         f"• Natija va 2 soatdan keyin rejaning haqiqiy hisobi (R)\n\n"
         f"{status}\n\nBuyruqlar: /events · /plan · /results · /vip · /status"

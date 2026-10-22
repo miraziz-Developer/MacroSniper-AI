@@ -10,7 +10,7 @@ Hammasi 2012–2025 tarixida walk-forward usulida tekshirilgan: [research/REPORT
 
 ```
 ForexFactory (har 10 daq, GitHub mirror zaxira) ─► Event
-   T-3h  ─► Preview: "fakt yuqori → oltin X% hollarda tushgan" + rejaning tarixiy natijasi
+   T-2h  ─► Preview: "fakt yuqori → oltin X% hollarda tushgan" + rejaning tarixiy natijasi
    T-2m  ─► Reja: 15m ATR + 4 soatlik diapazon ─► BUY STOP / SELL STOP (OCO)
    T+20s ─► Fakt: FMP (kalit bo'lsa) yoki admin /actual ─► kutilgan yo'nalish + tarixiy %
    T+2h  ─► Hisob: reja 1 daqiqalik shamlar bo'yicha baholanadi (R), /results va Mini App'da ochiq

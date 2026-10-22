@@ -112,8 +112,8 @@ async def test_full_lifecycle_sends_each_stage_once(calendar, market, sent):
 
     texts_sent = [text for _, text in sent["vip"]]
     assert len(texts_sent) == 4 and all(ids == [555] for ids, _ in sent["vip"])
-    assert "3 soat qoldi" in texts_sent[0] and "Tarix" in texts_sent[0]
-    assert "SAVDO REJASI" in texts_sent[1] and "NATIJA CHIQDI" in texts_sent[2] and "REJA NATIJASI" in texts_sent[3]
+    assert "2 soat qoldi" in texts_sent[0] and "Tarix" in texts_sent[0]
+    assert "SAVDO REJASI" in texts_sent[1] and "pips" in texts_sent[1] and "NATIJA CHIQDI" in texts_sent[2] and "REJA NATIJASI" in texts_sent[3]
     assert len(sent["channel"]) == 3  # teaser + public outcome + public review
     async with SessionLocal() as s:
         ev = await s.get(Event, ref.id)
@@ -175,7 +175,7 @@ def test_stage_times():
     review_at = t + timedelta(minutes=125)
     early = scheduler.stage_times(t, EventState.SCHEDULED, True, t - timedelta(hours=5))
     assert early == {
-        "context": t - timedelta(hours=3),
+        "context": t - timedelta(hours=2),
         "plan": t - timedelta(minutes=2),
         "poll": t + timedelta(seconds=20),
         "review": review_at,
