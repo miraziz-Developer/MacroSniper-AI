@@ -179,6 +179,7 @@ def test_stage_times():
         "plan": t - timedelta(minutes=2),
         "poll": t + timedelta(seconds=20),
         "review": review_at,
+        "live": t - timedelta(seconds=30),
     }
     assert scheduler.stage_times(t, EventState.SCHEDULED, False, t - timedelta(hours=5)) == {}
 
@@ -186,7 +187,7 @@ def test_stage_times():
     assert scheduler.stage_times(t, EventState.SCHEDULED, True, late_now)["context"] == late_now
 
     after = scheduler.stage_times(t, EventState.PLAN_SENT, True, t + timedelta(minutes=1))
-    assert set(after) == {"poll", "review"}
+    assert set(after) == {"poll", "review", "live"}  # restarted mid-window: live monitor resumes
     resolved = scheduler.stage_times(t, EventState.RESOLVED, True, t + timedelta(hours=3))
     assert resolved == {"review": t + timedelta(hours=3)}  # overdue review runs now
     assert scheduler.stage_times(t, EventState.RESOLVED, True, t + timedelta(days=2)) == {}
@@ -206,3 +207,42 @@ async def test_keep_awake_pings_public_health(monkeypatch):
     monkeypatch.setattr(scheduler.httpx, "AsyncClient", FakeClient)
     await scheduler.keep_awake()
     assert calls == ["https://x.onrender.com/health"]
+
+
+async def test_live_monitor_pushes_each_phase_once(calendar, market, sent, monkeypatch):
+    await _vip()
+    calendar.append(item(NFP, utcnow() + timedelta(minutes=30)))
+    (ref,) = await orchestrator.sync_calendar()
+    assert await orchestrator.run_plan(ref.id)
+    sent["vip"].clear()
+    async with SessionLocal() as s:  # pretend the release already happened
+        ev = await s.get(Event, ref.id)
+        ev.event_time = utcnow() - timedelta(minutes=5)
+        await s.commit()
+
+    flat = Candle(0, 4140, 4140.2, 4139.8, 4140)
+    frames = [
+        [flat] * 2,  # waiting
+        [flat, Candle(1, 4140, 4144, 4140, 4144)],  # BUY STOP 4143.70 filled
+        [flat, Candle(1, 4140, 4144, 4140, 4144), Candle(2, 4144, 4160, 4144, 4158)],  # TP1 hit
+        [flat, Candle(1, 4140, 4144, 4140, 4144), Candle(2, 4144, 4160, 4144, 4158), Candle(3, 4158, 4170, 4158, 4170)],
+    ]
+
+    async def minute_candles(source, start, minutes):
+        return frames.pop(0) if len(frames) > 1 else frames[0]
+
+    async def no_sleep(_):
+        return None
+
+    monkeypatch.setattr(orchestrator.market, "minute_candles", minute_candles)
+    monkeypatch.setattr(orchestrator.asyncio, "sleep", no_sleep)
+    orchestrator._live.discard(ref.id)
+    await orchestrator.run_live(ref.id)
+    texts_sent = [text for _, text in sent["vip"]]
+    assert len(texts_sent) == 3
+    assert "BUY STOP ochildi" in texts_sent[0] and "TP1 urildi" in texts_sent[1] and "TP2 urildi" in texts_sent[2]
+
+    orchestrator._live.discard(ref.id)  # e.g. after a restart: phases already announced are not repeated
+    frames[:] = [frames[-1]]
+    await orchestrator.run_live(ref.id)
+    assert len(sent["vip"]) == 3

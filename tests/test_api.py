@@ -107,3 +107,24 @@ async def test_track_record_is_public(client):
         await s.commit()
     tr = (await client.get("/api/app/state")).json()["track_record"]
     assert tr["total_r"] == 1.25 and tr["plans"][0]["title"] == "Non-Farm Employment Change"
+
+
+async def test_live_endpoint_is_vip_only(client, monkeypatch):
+    from app.market.indicators import Candle
+
+    event_id = await _event_with_plan()
+    async with SessionLocal() as s:
+        ev = await s.get(Event, event_id)
+        ev.event_time = utcnow() - timedelta(minutes=3)
+        await s.commit()
+    free = {"X-Telegram-Init-Data": signed_init_data(42)}
+    assert (await client.get("/api/app/live", headers=free)).status_code == 403
+    async with SessionLocal() as s:
+        await extend_vip(s, await get_or_create_user(s, 42), 30)
+
+    async def minute_candles(source, start, minutes):
+        return [Candle(0, 4140, 4146, 4140, 4146)]  # BUY STOP 4145.50 filled
+
+    monkeypatch.setattr(routes.orchestrator.market, "minute_candles", minute_candles)
+    live = (await client.get("/api/app/live", headers=free)).json()
+    assert live["phase"] == "open" and live["side"] == 1 and live["price"] == 4146

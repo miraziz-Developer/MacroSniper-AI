@@ -32,6 +32,8 @@ def stage_times(event_time: datetime, state: EventState, plannable: bool, now: d
         times["plan"] = max(plan_at, now)
     if state != EventState.RESOLVED and now < event_time + orchestrator.POLL_WINDOW:
         times["poll"] = max(poll_at, now)
+    if now < event_time + timedelta(minutes=orchestrator.REVIEW_MINUTES):
+        times["live"] = max(event_time - timedelta(seconds=30), now)
     if now < event_time + REVIEW_UNTIL:  # retried by each re-sync until candles are available
         times["review"] = max(event_time + REVIEW_AFTER, now)
     return times
@@ -42,6 +44,7 @@ _JOBS = {
     "plan": orchestrator.run_plan,
     "poll": orchestrator.poll_actual,
     "review": orchestrator.run_review,
+    "live": orchestrator.run_live,
 }
 
 
