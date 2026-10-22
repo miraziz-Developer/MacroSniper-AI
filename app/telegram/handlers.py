@@ -7,7 +7,9 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, WebAppInfo
 from sqlalchemy import func, select
 
-from app.billing.subscriptions import VIP_PAYLOAD, extend_vip, get_or_create_user, record_payment, revoke_vip
+from app.billing.subscriptions import (
+    VIP_PAYLOAD, extend_vip, get_or_create_user, record_payment, redeem_promo, revoke_vip,
+)
 from app.core.config import settings
 from app.core.db import SessionLocal
 from app.models import Event, EventState, Payment, Plan, User, utcnow
@@ -182,6 +184,23 @@ async def on_paid(message: types.Message):
     if credited:
         logger.info("VIP payment %s from %s", pay.telegram_payment_charge_id, message.from_user.id)
         await message.answer(f"✅ Rahmat! VIP {texts.tashkent_time(user.vip_until)} gacha faol.")
+
+
+@router.message(Command("promo"))
+async def cmd_promo(message: types.Message, command: CommandObject):
+    if not command.args:
+        await message.answer("Foydalanish: /promo KOD")
+        return
+    async with SessionLocal() as session:
+        user = await get_or_create_user(session, message.from_user.id, message.from_user.username)
+        result = await redeem_promo(session, user, command.args)
+        user = await session.get(User, user.id)
+    await message.answer({
+        "ok": f"🎁 Tabriklaymiz! {settings.PROMO_DAYS} kunlik bepul VIP {texts.tashkent_time(user.vip_until)} gacha faol.",
+        "used": "Bu promo-koddan allaqachon foydalangansiz.",
+        "exhausted": "Afsuski, bu promo-kodning barcha joylari band bo'lgan.",
+        "invalid": "Promo-kod noto'g'ri.",
+    }[result])
 
 
 @router.message(Command("paysupport"))

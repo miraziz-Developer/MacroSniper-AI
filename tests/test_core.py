@@ -87,3 +87,22 @@ async def test_init_db_adds_new_nullable_columns_to_existing_tables():
     async with engine.connect() as conn:
         cols = await conn.run_sync(lambda c: {col["name"] for col in inspect(c).get_columns("plans")})
     assert "result_r" in cols
+
+
+async def test_promo_code_two_people_once_each(monkeypatch):
+    from app.billing.subscriptions import redeem_promo
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "PROMO_CODE", "Oltin2026")
+    async with SessionLocal() as s:
+        a, b, c = [await get_or_create_user(s, i) for i in (901, 902, 903)]
+        assert await redeem_promo(s, a, "wrong") == "invalid"
+        assert await redeem_promo(s, a, " oltin2026 ") == "ok"  # case/space tolerant
+        assert a.vip_until > utcnow() + timedelta(days=29)
+        assert await redeem_promo(s, a, "OLTIN2026") == "used"
+        assert await redeem_promo(s, b, "Oltin2026") == "ok"
+        assert await redeem_promo(s, c, "Oltin2026") == "exhausted"  # limit 2
+        assert not c.is_vip()
+    monkeypatch.setattr(settings, "PROMO_CODE", None)
+    async with SessionLocal() as s:
+        assert await redeem_promo(s, await get_or_create_user(s, 904), "anything") == "invalid"  # disabled

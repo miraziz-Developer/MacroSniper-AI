@@ -1,10 +1,13 @@
 from datetime import timedelta
 from typing import List, Optional
 
-from sqlalchemy import select
+import secrets
+
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models import Payment, User, utcnow
 
 VIP_PAYLOAD = "vip"  # invoice payload for the Stars subscription
@@ -59,3 +62,20 @@ async def active_vip_chat_ids(session: AsyncSession) -> List[int]:
         select(User.telegram_id).where(User.vip_until > utcnow(), User.blocked_bot.is_(False))
     )
     return list(rows.scalars())
+
+
+async def redeem_promo(session: AsyncSession, user: User, code: str) -> str:
+    """Free VIP for the first PROMO_LIMIT people with the code: ok | invalid | used | exhausted.
+
+    shortcut: two simultaneous redemptions of the last slot can both succeed; fine for a handful of codes.
+    """
+    if not settings.PROMO_CODE or not secrets.compare_digest(code.strip().lower(), settings.PROMO_CODE.strip().lower()):
+        return "invalid"
+    charge_id = f"promo:{user.telegram_id}"
+    if await session.scalar(select(Payment.id).where(Payment.telegram_charge_id == charge_id)):
+        return "used"
+    used = await session.scalar(select(func.count(Payment.id)).where(Payment.telegram_charge_id.like("promo:%")))
+    if used >= settings.PROMO_LIMIT:
+        return "exhausted"
+    return "ok" if await record_payment(session, user, charge_id, 0, settings.PROMO_DAYS) else "used"
+
