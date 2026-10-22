@@ -17,28 +17,35 @@ Telegram va Mini App orqali beradi, yangilik chiqqach natijani tasdiqlaydi.
 | Obuna/to'lov yo'q, Mini App hammaga ochiq | VIP kontent bepul |
 | SQLite Renderda har restartda o'chadi | Holatlar yo'qoladi |
 
-## 3. Signal mantiqi (halol model)
+## 3. Signal mantiqi (tarixda tekshirilgan)
 
-Yangilik natijasini oldindan bilib bo'lmaydi, shuning uchun mahsulot — **ssenariy reja**:
+Asos: [research/REPORT.md](../research/REPORT.md) — ForexFactory tarixi 2012–2025 + Dukascopy XAUUSD
+1 daqiqalik shamlar, barcha modellar walk-forward (faqat o'tmish bilan o'qitilgan).
 
-1. **T-3h — Kontekst.** DXY va US10Y o'zgarishi (1 kun / 5 kun), oltin trendi,
-   forecast vs previous. Natija: `score` (-100..100), `bias` (BUY/SELL/NEUTRAL), sabablar.
-2. **T-2m — Reja.** Oltin 15m shamlaridan ATR(14) va so'nggi 4 soat diapazoni.
-   Diapazon ustida `BUY STOP`, ostida `SELL STOP`, SL/TP ATR'dan.
-   Faqat `|score| ≥ 50` bo'lsa bitta tomon "asosiy" deb belgilanadi, aks holda
-   **"Yo'nalish noaniq — faqat breakout rejasi"**.
-3. **T+0 — Natija.** `actual` kelganda surprise = actual − forecast; yo'nalish qoidasi har
-   yangilik turi uchun alohida (CPI/NFP yuqori → USD kuchli → oltin SELL; Claims yuqori → BUY).
-   Mos tomon tasdiqlanadi, teskarisi bekor qilinadi.
+Topilmalar:
+- Yangilikdan **oldin** oltin yo'nalishini bepul ma'lumot bilan bashorat qilib bo'lmaydi (~52%, tanga darajasi).
+  Shuning uchun tizim "BUY 85%" kabi yo'nalish da'vo qilmaydi.
+- Raqam chiqqach oltin syurprizga qarshi tomonga 1 daqiqada 73–88% hollarda harakat qiladi —
+  bu foydalanuvchiga **ssenariy ehtimoli** sifatida beriladi ("fakt yuqori → oltin 84% hollarda tushgan").
+- OCO straddle faqat NFP'da barqaror musbat (2012–2020 +0.68R, 2021–2025 +0.64R), CPI zaif musbat;
+  boshqa yangiliklarda manfiy. Reja faqat backtest'i musbat bo'lgan yangiliklarga beriladi.
 
-Barcha formulalar sof funksiyalar va unit-testlar bilan qoplangan.
+Bosqichlar (faqat rejaga loyiq yangiliklar uchun):
+1. **T-3h — Preview:** tarixiy ssenariylar va rejaning tarixiy natijasi.
+2. **T-2m — Reja:** 15m ATR(14) va 4 soatlik diapazon; kirish diapazondan tashqarida 0.3–0.8 ATR,
+   SL 2 ATR (=1R), TP1 1.5R (yarmi, SL→kirish), TP2 3R, 30 daqiqada ochilmasa bekor, 2 soatda yopiladi.
+3. **T+0 — Natija:** fakt − prognoz → kutilgan yo'nalish va uning tarixiy ehtimoli.
+4. **T+2h — Hisob:** reja haqiqiy 1 daqiqalik shamlar bo'yicha backtest bilan **bir xil kod**
+   (`app/signals/plan.py::simulate`) orqali baholanadi, natija R da saqlanadi va ochiq ko'rsatiladi.
+
+Parametrlar va statistikalar `research/analyze.py` → `app/signals/stats.json` orqali yangilanadi.
 
 ## 4. Ma'lumot manbalari (bepul)
 
 | Ma'lumot | Asosiy | Zaxira |
 |---|---|---|
-| Oltin narxi + 15m shamlar | Yahoo `GC=F` | Binance `PAXGUSDT` |
-| DXY, US10Y | Yahoo `DX-Y.NYB`, `^TNX` | yo'q bo'lsa kontekstdan chiqariladi |
+| Oltin narxi, 15m va 1m shamlar | Binance `PAXGUSDT` | Yahoo `GC=F` |
+| Tarix (tadqiqot) | Hugging Face `Tropstan/Forex_Factory_Calendar` (MIT), Dukascopy | — |
 | Kalendar | ForexFactory haftalik JSON (1 soat kesh + disk kesh): USD High + rejalashtiriladigan Medium (Claims, PMI…) | — |
 | Actual | `FMP_API_KEY` bo'lsa avtomatik; admin `/actual`; admin webhook | — |
 

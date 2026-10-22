@@ -54,9 +54,6 @@ class Settings(BaseSettings):
     VIP_PRICE_STARS: int = 500
     VIP_DAYS: int = 30
 
-    # Signal rules
-    CONVICTION_THRESHOLD: float = 50.0  # |context score| needed to name a primary side
-
     @field_validator("DATABASE_URL")
     @classmethod
     def _normalize_db(cls, v: str) -> str:

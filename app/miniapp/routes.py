@@ -15,6 +15,8 @@ from app.core.db import get_db
 from app.core.security import validate_init_data
 from app.market import data as market
 from app.models import Event, EventState, Plan, User, utcnow
+from app.signals import history
+from app.signals.rules import classify
 from app.telegram.bot import get_bot
 
 logger = logging.getLogger(__name__)
@@ -45,11 +47,21 @@ def event_dict(ev: Event) -> dict:
         "actual": ev.actual,
         "unit": ev.unit,
         "state": ev.state.value,
-        "plannable": ev.state != EventState.SKIPPED,
-        "context_bias": ev.context_bias,
-        "context_score": ev.context_score,
-        "context_reasons": (ev.context_reasons or "").split("\n") if ev.context_reasons else [],
+        "plannable": history.is_plannable(ev.title),
         "outcome": ev.outcome,
+    }
+
+
+def scenario_dict(title: str) -> Optional[dict]:
+    """Historical 'if actual > forecast, gold went X' odds and the plan's backtest for this release."""
+    kind, reaction = classify(title), history.reaction(title)
+    if kind is None or reaction is None:
+        return None
+    return {
+        "period": history.PERIOD,
+        "higher_gold": "SELL" if kind.usd_up_when_higher else "BUY",
+        **reaction,
+        "straddle": history.straddle(title),
     }
 
 
@@ -59,8 +71,8 @@ def _plan_dict(plan: Plan) -> dict:
         "price": plan.price,
         "atr": plan.atr,
         "range": [plan.range_low, plan.range_high],
-        "primary": plan.primary,
         "source": plan.price_source,
+        "result_r": plan.result_r,
         "buy": {"entry": plan.buy_entry, "sl": plan.buy_sl, "tp1": plan.buy_tp1, "tp2": plan.buy_tp2},
         "sell": {"entry": plan.sell_entry, "sl": plan.sell_sl, "tp1": plan.sell_tp1, "tp2": plan.sell_tp2},
         "created_at": plan.created_at.isoformat(),
@@ -89,7 +101,14 @@ async def app_state(
             select(Event).where(Event.state == EventState.RESOLVED).order_by(Event.event_time.desc()).limit(8)
         )
     ).scalars().all()
-    focus = next((e for e in upcoming if e.state not in (EventState.SKIPPED, EventState.RESOLVED)), None)
+    pending = [e for e in upcoming if e.state not in (EventState.SKIPPED, EventState.RESOLVED)]
+    focus = next((e for e in pending if history.is_plannable(e.title)), pending[0] if pending else None)
+    reviewed = (
+        await db.execute(
+            select(Plan, Event).join(Event, Plan.event_id == Event.id)
+            .where(Plan.result_r.is_not(None)).order_by(Event.event_time.desc()).limit(20)
+        )
+    ).all()
 
     latest = (
         await db.execute(
@@ -110,11 +129,15 @@ async def app_state(
             "vip_until": user.vip_until.isoformat() if user and user.vip_until else None,
         },
         "vip": {"stars": settings.VIP_PRICE_STARS, "days": settings.VIP_DAYS},
-        "focus": event_dict(focus) if focus else None,
+        "focus": {**event_dict(focus), "scenario": scenario_dict(focus.title)} if focus else None,
         "plan": _plan_dict(latest) if latest and is_vip else None,
         "plan_exists": latest is not None,
         "calendar": [event_dict(e) for e in upcoming],
         "results": [event_dict(e) for e in results],
+        "track_record": {
+            "plans": [{"title": e.title, "event_time": e.event_time.isoformat(), "result_r": p.result_r} for p, e in reviewed],
+            "total_r": round(sum(p.result_r for p, _ in reviewed), 2),
+        },
     }
 
 

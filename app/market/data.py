@@ -1,19 +1,21 @@
-"""Free market data: Binance PAXG (tracks spot gold, 24/7) with Yahoo Finance as fallback/macro source."""
+"""Free gold market data: Binance PAXG (tracks spot gold) with Yahoo COMEX futures as fallback."""
 
 import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import httpx
 
-from app.market.indicators import Candle, atr, pct_change, recent_range
+from app.market.indicators import Candle, atr, recent_range
 
 logger = logging.getLogger(__name__)
 
 BINANCE = "https://api.binance.com/api/v3"
 YAHOO = "https://query1.finance.yahoo.com/v8/finance/chart"
 HEADERS = {"User-Agent": "Mozilla/5.0 (MacroSniper)"}
+PAXG, COMEX = "Binance PAXG", "COMEX GC=F"  # price source names, stored with each plan
 TIMEOUT = httpx.Timeout(6.0)
 
 _cache: Dict[str, Tuple[float, Any]] = {}
@@ -40,8 +42,11 @@ async def _get_json(url: str, params: Optional[dict] = None) -> Optional[Any]:
         return None
 
 
-async def _binance_candles(interval: str, limit: int) -> Optional[List[Candle]]:
-    data = await _get_json(f"{BINANCE}/klines", {"symbol": "PAXGUSDT", "interval": interval, "limit": limit})
+async def _binance_candles(interval: str, limit: int, start_ms: Optional[int] = None) -> Optional[List[Candle]]:
+    params = {"symbol": "PAXGUSDT", "interval": interval, "limit": limit}
+    if start_ms is not None:
+        params["startTime"] = start_ms
+    data = await _get_json(f"{BINANCE}/klines", params)
     if not isinstance(data, list) or not data:
         return None
     try:
@@ -66,9 +71,9 @@ async def gold_candles_15m() -> Tuple[Optional[List[Candle]], str]:
     """Last ~2 days of 15m gold candles and the source name."""
     candles = await _cached("gold15", 60, lambda: _binance_candles("15m", 200))
     if candles:
-        return candles, "Binance PAXG"
+        return candles, PAXG
     candles = await _cached("gold15y", 60, lambda: _yahoo_candles("GC=F", "15m", "2d"))
-    return (candles, "COMEX GC=F") if candles else (None, "none")
+    return (candles, COMEX) if candles else (None, "none")
 
 
 async def gold_price() -> Tuple[Optional[float], str]:
@@ -81,43 +86,21 @@ async def gold_price() -> Tuple[Optional[float], str]:
 
     price = await _cached("gold_px", 5, load)
     if price:
-        return round(price, 2), "Binance PAXG"
+        return round(price, 2), PAXG
     candles, source = await gold_candles_15m()
     return (round(candles[-1].close, 2), source) if candles else (None, "none")
 
 
-async def _daily_closes(symbol: str) -> Optional[List[float]]:
-    candles = await _cached(f"d1:{symbol}", 900, lambda: _yahoo_candles(symbol, "1d", "1mo"))
-    return [c.close for c in candles] if candles else None
-
-
-@dataclass(frozen=True)
-class MacroSnapshot:
-    dxy_1d_pct: Optional[float]
-    dxy_5d_pct: Optional[float]
-    us10y_1d_bps: Optional[float]
-    us10y_5d_bps: Optional[float]
-    gold_5d_pct: Optional[float]
-
-
-def _bps_change(closes: Optional[List[float]], lookback: int) -> Optional[float]:
-    # ^TNX is quoted in percent (4.25 = 4.25%), so 1 point = 100 bps
-    if not closes or len(closes) <= lookback:
+async def minute_candles(source: str, start: datetime, minutes: int) -> Optional[List[Candle]]:
+    """1-minute candles from `start` (UTC) on the same instrument the plan was priced on — no caching."""
+    if source == PAXG:
+        candles = await _binance_candles("1m", min(minutes, 1000), start_ms=int(start.timestamp() * 1000))
+    else:
+        candles = await _yahoo_candles("GC=F", "1m", "5d")  # Yahoo keeps 1m data ~7 days
+    if not candles:
         return None
-    return (closes[-1] - closes[-1 - lookback]) * 100.0
-
-
-async def macro_snapshot() -> MacroSnapshot:
-    dxy = await _daily_closes("DX-Y.NYB")
-    tnx = await _daily_closes("^TNX")
-    gold = await _daily_closes("GC=F")
-    return MacroSnapshot(
-        dxy_1d_pct=pct_change(dxy, 1) if dxy else None,
-        dxy_5d_pct=pct_change(dxy, 5) if dxy else None,
-        us10y_1d_bps=_bps_change(tnx, 1),
-        us10y_5d_bps=_bps_change(tnx, 5),
-        gold_5d_pct=pct_change(gold, 5) if gold else None,
-    )
+    first = int(start.timestamp())
+    return [c for c in candles if c.ts >= first][:minutes]
 
 
 @dataclass(frozen=True)
@@ -135,7 +118,7 @@ async def levels_input() -> Optional[LevelsInput]:
     if not candles:
         return None
     # Price must come from the same instrument as the candles (PAXG and GC=F differ by several dollars)
-    price = (await gold_price())[0] if source == "Binance PAXG" else round(candles[-1].close, 2)
+    price = (await gold_price())[0] if source == PAXG else round(candles[-1].close, 2)
     value = atr(candles, 14)
     rng = recent_range(candles, 16)
     if price is None or value is None or rng is None:

@@ -5,10 +5,11 @@ from html import escape
 from typing import Optional
 
 from app.models import Event, Plan
-from app.signals.context import Context
+from app.signals import history
+from app.signals.rules import classify
 
 TASHKENT = timezone(timedelta(hours=5))
-RISK_NOTE = "<i>⚠️ Bu moliyaviy maslahat emas. Riskni o'zingiz boshqaring: bitta savdoda balansning 1–2% idan ko'p tavakkal qilmang.</i>"
+RISK_NOTE = "<i>⚠️ Bu moliyaviy maslahat emas. Bitta savdoda balansning 1–2% idan ko'p tavakkal qilmang.</i>"
 
 SIDE_UZ = {"BUY": "🟢 BUY (oltin ko'tariladi)", "SELL": "🔴 SELL (oltin tushadi)", "INLINE": "⚪ Prognozga mos"}
 
@@ -21,6 +22,10 @@ def _fmt(v: Optional[float], unit: Optional[str]) -> str:
     return "—" if v is None else f"{v:g}{unit or ''}"
 
 
+def _pct(v: float) -> str:
+    return f"{v * 100:.0f}%"
+
+
 def event_line(ev: Event) -> str:
     return (
         f"<b>{escape(ev.title)}</b>\n"
@@ -28,15 +33,37 @@ def event_line(ev: Event) -> str:
     )
 
 
-def context_message(ev: Event, ctx: Context) -> str:
-    bias = {"BUY": "🟢 Oltin uchun BUY tomonga moyil", "SELL": "🔴 Oltin uchun SELL tomonga moyil"}.get(
-        ctx.bias, "⚪ Aniq yo'nalish yo'q — faqat breakout rejasi"
-    )
-    reasons = "\n".join(f"• {escape(r)}" for r in ctx.reasons)
+def scenarios(title: str) -> str:
+    """'If actual > forecast gold fell X% of the time' — the honest form of 'which way, how likely'."""
+    kind, stats = classify(title), history.reaction(title)
+    if kind is None or stats is None:
+        return ""
+    up_gold = "BUY" if not kind.usd_up_when_higher else "SELL"  # gold side when actual > forecast
+    down_gold = "SELL" if up_gold == "BUY" else "BUY"
     return (
-        f"🧭 <b>3 soat qoldi — bozor konteksti</b>\n\n{event_line(ev)}\n\n"
-        f"{bias} (ball: {ctx.gold_score:+.0f}/100)\n{reasons}\n\n"
-        f"Savdo rejasi yangilikdan 2 daqiqa oldin yuboriladi."
+        f"📊 <b>Tarix ({history.PERIOD}, {stats['n']} ta chiqish):</b>\n"
+        f"• Fakt prognozdan <b>yuqori</b> → {SIDE_UZ[up_gold]}\n"
+        f"• Fakt prognozdan <b>past</b> → {SIDE_UZ[down_gold]}\n"
+        f"Shu yo'nalish 1 daqiqada {_pct(stats['against_1m'])}, 15 daqiqada {_pct(stats['against_15m'])} hollarda to'g'ri chiqqan; "
+        f"odatiy 15 daqiqalik harakat ≈ ${stats['median_move_15m']:.2f}."
+    )
+
+
+def straddle_record(title: str) -> str:
+    stats = history.straddle(title)
+    if not stats:
+        return ""
+    return (
+        f"📈 Shu rejaning tarixiy natijasi: {int(stats['trades'])} ta bitim, {_pct(stats['win'])} foydali, "
+        f"o'rtacha {stats['exp_r']:+.2f}R har bitimga (sirpanish hisobga olingan)."
+    )
+
+
+def preview_message(ev: Event) -> str:
+    return (
+        f"🧭 <b>3 soat qoldi</b>\n\n{event_line(ev)}\n\n"
+        f"Yo'nalishni oldindan hech kim aniq bilmaydi — natija faktga bog'liq.\n{scenarios(ev.title)}\n\n"
+        f"{straddle_record(ev.title)}\nBUY STOP / SELL STOP rejasi yangilikdan 2 daqiqa oldin keladi."
     )
 
 
@@ -48,53 +75,55 @@ def _side_block(title: str, entry: float, sl: float, tp1: float, tp2: float, pri
 
 
 def plan_message(ev: Event, plan: Plan) -> str:
-    if plan.primary:
-        head = f"Asosiy tomon: {SIDE_UZ[plan.primary]} — teskari order himoya uchun."
-    else:
-        head = "Yo'nalish noaniq: ikkala order ham qo'yiladi, qaysi biri ochilsa, ikkinchisini bekor qiling."
     return (
         f"🎯 <b>XAUUSD SAVDO REJASI — 2 daqiqa qoldi</b>\n\n{event_line(ev)}\n\n"
         f"Joriy narx: <code>{plan.price:.2f}</code> ({escape(plan.price_source)}) · ATR(15m): {plan.atr:.2f}$\n"
         f"Yangilik oldi diapazoni: {plan.range_low:.2f} – {plan.range_high:.2f}\n\n"
         f"{_side_block('BUY STOP', plan.buy_entry, plan.buy_sl, plan.buy_tp1, plan.buy_tp2, plan.price)}\n"
         f"{_side_block('SELL STOP', plan.sell_entry, plan.sell_sl, plan.sell_tp1, plan.sell_tp2, plan.price)}\n\n"
-        f"{head}\n"
-        f"TP1 da yarmini yoping va SL ni kirish narxiga o'tkazing.\n"
-        f"Brokeringiz narxi farq qilsa, qavs ichidagi masofalardan foydalaning.\n\n{RISK_NOTE}"
+        f"Ikkala orderni qo'ying; biri ochilgach ikkinchisini bekor qiling. 30 daqiqada ochilmasa — ikkalasini o'chiring.\n"
+        f"TP1 da yarmini yoping va SL ni kirish narxiga o'tkazing; 2 soatdan keyin qolganini yoping.\n"
+        f"Brokeringiz narxi farq qilsa, qavsdagi masofalardan foydalaning.\n\n"
+        f"{straddle_record(ev.title)}\n\n{RISK_NOTE}"
     )
 
 
 def outcome_message(ev: Event) -> str:
-    side = SIDE_UZ.get(ev.outcome or "INLINE", "")
+    stats = history.reaction(ev.title)
     if ev.outcome == "INLINE":
-        action = "Kuchli impuls kutilmaydi — ochilmagan orderlarni bekor qilish tavsiya etiladi."
+        action = "Fakt prognozga teng — kuchli impuls kutilmaydi."
     else:
-        keep = "BUY STOP" if ev.outcome == "BUY" else "SELL STOP"
-        drop = "SELL STOP" if ev.outcome == "BUY" else "BUY STOP"
-        action = f"{keep} saqlanadi, {drop} bekor qilinadi."
+        odds = f" Tarixda bu {_pct(stats['against_1m'])} hollarda to'g'ri chiqqan." if stats else ""
+        action = f"Kutilgan yo'nalish: {SIDE_UZ[ev.outcome]}.{odds}"
+    return f"⚡ <b>NATIJA CHIQDI</b>\n\n{event_line(ev)}\nFakt: <b>{_fmt(ev.actual, ev.unit)}</b>\n\n{action}"
+
+
+def review_message(ev: Event, plan: Plan) -> str:
+    r = plan.result_r or 0.0
+    if plan.result_r == 0:
+        verdict = "⚪ Orderlar ochilmadi — bekor qilindi (0R)."
+    elif r > 0:
+        verdict = f"✅ Foyda: <b>{r:+.2f}R</b>"
+    else:
+        verdict = f"❌ Zarar: <b>{r:+.2f}R</b>"
     return (
-        f"⚡ <b>NATIJA CHIQDI</b>\n\n{event_line(ev)}\n"
-        f"Fakt: <b>{_fmt(ev.actual, ev.unit)}</b>\n\n{side}\n{action}"
+        f"🧾 <b>REJA NATIJASI</b>\n\n{escape(ev.title)} · {tashkent_time(ev.event_time)}\n{verdict}\n"
+        f"<i>1R = stop-loss masofasi. Hisob 1 daqiqalik shamlar bo'yicha, sirpanish bilan.</i>"
     )
 
 
 def teaser_message(ev: Event) -> str:
-    return (
-        f"🎯 {event_line(ev)}\n\n"
-        f"XAUUSD savdo rejasi VIP obunachilarga yuborildi. Obuna: botdagi /vip buyrug'i."
-    )
+    return f"🎯 {event_line(ev)}\n\nXAUUSD savdo rejasi VIP obunachilarga yuborildi. Obuna: botdagi /vip buyrug'i."
 
 
 def welcome_message(first_name: str, is_vip: bool, vip_until: Optional[datetime]) -> str:
-    status = (
-        f"💎 VIP faol: {tashkent_time(vip_until)} gacha" if is_vip and vip_until else "Holat: FREE (bepul)"
-    )
+    status = f"💎 VIP faol: {tashkent_time(vip_until)} gacha" if is_vip and vip_until else "Holat: FREE (bepul)"
     return (
         f"Assalomu alaykum, <b>{escape(first_name)}</b>!\n\n"
-        f"<b>MacroSniper</b> — AQSH makro yangiliklari (CPI, NFP, FOMC, Claims…) paytida XAUUSD uchun "
-        f"haqiqiy bozor ma'lumotiga asoslangan savdo rejasini beradi:\n"
-        f"• 3 soat oldin — DXY, obligatsiyalar va prognoz bo'yicha kontekst\n"
-        f"• 2 daqiqa oldin — ATR va diapazon asosida BUY STOP / SELL STOP reja\n"
-        f"• Natija chiqqanda — qaysi orderni saqlash kerakligi\n\n"
-        f"{status}\n\nBuyruqlar: /events · /plan · /vip · /status"
+        f"<b>MacroSniper</b> — AQSH makro yangiliklari paytida XAUUSD uchun 2012–2025 yillar tarixida "
+        f"sinalgan savdo rejalari:\n"
+        f"• 3 soat oldin — fakt yuqori/past chiqsa oltin qayerga ketgani (tarixiy %)\n"
+        f"• 2 daqiqa oldin — ATR va diapazon asosida BUY STOP / SELL STOP (faqat tarixda foyda bergan yangiliklarda)\n"
+        f"• Natija va 2 soatdan keyin rejaning haqiqiy hisobi (R)\n\n"
+        f"{status}\n\nBuyruqlar: /events · /plan · /results · /vip · /status"
     )

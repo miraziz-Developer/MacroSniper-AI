@@ -27,10 +27,3 @@ def recent_range(candles: Sequence[Candle], bars: int) -> Optional[Tuple[float, 
     if not window:
         return None
     return max(c.high for c in window), min(c.low for c in window)
-
-
-def pct_change(closes: Sequence[float], lookback: int) -> Optional[float]:
-    """Percent change of the last close versus `lookback` closes earlier."""
-    if len(closes) <= lookback or closes[-1 - lookback] == 0:
-        return None
-    return (closes[-1] / closes[-1 - lookback] - 1.0) * 100.0

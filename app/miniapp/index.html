@@ -29,7 +29,8 @@
   .row { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
   .title { font-weight: 600; }
   .countdown { font: 700 22px/1.2 ui-monospace, Menlo, monospace; margin-top: 8px; }
-  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .pill.VIP { background: rgba(59,130,246,.15); color: var(--accent); }
   .pill.BUY { background: rgba(22,163,74,.15); color: var(--buy); }
   .pill.SELL { background: rgba(220,38,38,.15); color: var(--sell); }
   .pill.NEUTRAL, .pill.INLINE { background: rgba(138,150,168,.15); color: var(--muted); }
@@ -65,7 +66,10 @@
   <h2>Kalendar (7 kun, AQSH)</h2>
   <section class="card list" id="calendar"></section>
 
-  <h2>So'nggi natijalar</h2>
+  <h2>Rejalar natijasi (jonli)</h2>
+  <section class="card list" id="track"></section>
+
+  <h2>So'nggi yangilik natijalari</h2>
   <section class="card list" id="results"></section>
 
   <p class="note">Bu moliyaviy maslahat emas. Bitta savdoda balansning 1–2% idan ko'p tavakkal qilmang. Vaqtlar — Toshkent.</p>
@@ -86,7 +90,7 @@ const fmtTime = (iso) => {
   const p = (n) => String(n).padStart(2, '0');
   return `${WEEKDAYS[t.getUTCDay()]}, ${p(t.getUTCDate())}.${p(t.getUTCMonth() + 1)} ${p(t.getUTCHours())}:${p(t.getUTCMinutes())}`;
 };
-const SIDE = {BUY: 'BUY — oltin ko\'tariladi', SELL: 'SELL — oltin tushadi', NEUTRAL: 'Yo\'nalish noaniq', INLINE: 'Prognozga mos'};
+const SIDE = {BUY: 'BUY ↑ oltin', SELL: 'SELL ↓ oltin', NEUTRAL: 'Yo\'nalish noaniq', INLINE: 'Prognozga mos'};
 
 let state = null;
 let serverOffsetMs = 0;  // device clocks drift; count down against server time
@@ -102,20 +106,30 @@ function renderFocus() {
   const ev = state.focus;
   const el = document.getElementById('focus');
   if (!ev) { el.innerHTML = '<div class="muted">Yaqin 7 kunda rejalashtiriladigan AQSH yangiligi yo\'q.</div>'; return; }
-  const reasons = ev.context_reasons.length ? `<ul class="reasons">${ev.context_reasons.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : '';
-  const bias = ev.context_bias ? `<div style="margin-top:10px"><span class="pill ${esc(ev.context_bias)}">${esc(SIDE[ev.context_bias] || ev.context_bias)}</span> <span class="muted">ball ${Math.round(ev.context_score)}</span></div>` : '<div class="muted" style="margin-top:10px">Kontekst tahlili yangilikdan 3 soat oldin chiqadi.</div>';
+  const sc = ev.scenario;
+  const pct = (v) => Math.round(v * 100) + '%';
+  let info = '<div class="muted" style="margin-top:10px">Bu yangilik uchun tarixiy statistika yo\'q.</div>';
+  if (sc) {
+    const lower = sc.higher_gold === 'BUY' ? 'SELL' : 'BUY';
+    const st = sc.straddle ? `<div class="muted" style="margin-top:8px">Reja tarixi: ${sc.straddle.trades} bitim, ${pct(sc.straddle.win)} foydali, o\'rtacha ${sc.straddle.exp_r >= 0 ? '+' : ''}${sc.straddle.exp_r.toFixed(2)}R</div>` : '<div class="muted" style="margin-top:8px">Bu yangilikda straddle tarixda foyda bermagan — reja berilmaydi.</div>';
+    info = `
+      <div style="margin-top:10px" class="muted">Tarix (${esc(sc.period)}, ${sc.n} ta chiqish):</div>
+      <div class="row" style="margin-top:6px"><span>Fakt prognozdan yuqori</span><span class="pill ${sc.higher_gold}">${esc(SIDE[sc.higher_gold])}</span></div>
+      <div class="row" style="margin-top:6px"><span>Fakt prognozdan past</span><span class="pill ${lower}">${esc(SIDE[lower])}</span></div>
+      <div class="muted" style="margin-top:6px">To'g'ri chiqqan: 1 daqiqada ${pct(sc.against_1m)}, 15 daqiqada ${pct(sc.against_15m)} · odatiy harakat ≈ $${sc.median_move_15m.toFixed(2)}</div>
+      ${st}`;
+  }
   el.innerHTML = `
     <div class="muted">Navbatdagi yangilik</div>
     <div class="title">${esc(ev.title)}</div>
     <div class="muted">${esc(fmtTime(ev.event_time))} · Prognoz ${esc(num(ev.forecast, ev.unit))} · Avvalgi ${esc(num(ev.previous, ev.unit))}</div>
     <div class="countdown" id="countdown">--:--:--</div>
-    ${bias}${reasons}`;
+    ${info}`;
 }
 
-function sideHtml(name, cls, s, price, primary) {
-  const star = primary === cls ? ' · <b>asosiy</b>' : '';
+function sideHtml(name, cls, s, price) {
   return `<div class="side ${cls}">
-    <div class="row"><b>${name}</b><span class="muted">narxdan ${(s.entry - price >= 0 ? '+' : '')}${money(s.entry - price)}$${star}</span></div>
+    <div class="row"><b>${name}</b><span class="muted">narxdan ${(s.entry - price >= 0 ? '+' : '')}${money(s.entry - price)}$</span></div>
     <div class="grid">
       <div><span>Kirish</span>${money(s.entry)}</div><div><span>SL</span>${money(s.sl)}</div>
       <div><span>TP1</span>${money(s.tp1)}</div><div><span>TP2</span>${money(s.tp2)}</div>
@@ -128,9 +142,10 @@ function renderPlan() {
   if (p) {
     el.innerHTML = `
       <div class="muted">Narx ${money(p.price)} (${esc(p.source)}) · ATR(15m) ${money(p.atr)}$ · diapazon ${money(p.range[0])}–${money(p.range[1])}</div>
-      ${sideHtml('BUY STOP', 'BUY', p.buy, p.price, p.primary)}
-      ${sideHtml('SELL STOP', 'SELL', p.sell, p.price, p.primary)}
-      <div class="muted" style="margin-top:10px">${p.primary ? 'Teskari order — himoya.' : 'Ikkalasini qo\'ying; biri ochilsa, ikkinchisini bekor qiling.'} TP1 da yarmini yoping, SL ni kirishga o'tkazing.</div>
+      ${sideHtml('BUY STOP', 'BUY', p.buy, p.price)}
+      ${sideHtml('SELL STOP', 'SELL', p.sell, p.price)}
+      <div class="muted" style="margin-top:10px">Ikkalasini qo'ying; biri ochilsa, ikkinchisini bekor qiling (30 daqiqada ochilmasa — o'chiring). TP1 da yarmini yoping, SL ni kirishga o'tkazing, 2 soatda yoping.</div>
+      ${p.result_r !== null ? `<div style="margin-top:8px"><b>Natija: ${p.result_r >= 0 ? '+' : ''}${p.result_r.toFixed(2)}R</b></div>` : ''}
       <button class="secondary" onclick="copyPlan()">📋 Nusxalash</button>`;
     return;
   }
@@ -151,13 +166,23 @@ function renderList(id, events, emptyText, withOutcome) {
   el.innerHTML = events.map(ev => {
     const right = withOutcome
       ? `<span class="pill ${esc(ev.outcome)}">${esc(ev.outcome === 'INLINE' ? 'Mos' : ev.outcome)}</span>`
-      : (ev.plannable ? '' : '<span class="muted">nutq</span>');
+      : (ev.plannable ? '<span class="pill VIP">🎯 VIP reja</span>' : '');
     const nums = withOutcome
       ? `Fakt ${esc(num(ev.actual, ev.unit))} · Prognoz ${esc(num(ev.forecast, ev.unit))}`
       : `Prognoz ${esc(num(ev.forecast, ev.unit))} · Avvalgi ${esc(num(ev.previous, ev.unit))}`;
     return `<div class="item"><div class="row"><span class="title">${esc(ev.title)}</span>${right}</div>
       <div class="muted">${esc(fmtTime(ev.event_time))} · ${nums}</div></div>`;
   }).join('');
+}
+
+function renderTrack(tr) {
+  const el = document.getElementById('track');
+  if (!tr.plans.length) { el.innerHTML = '<div class="muted">Har reja yangilikdan 2 soat o\'tib avtomatik hisoblanadi. Hali natija yo\'q.</div>'; return; }
+  const sign = (v) => (v >= 0 ? '+' : '') + v.toFixed(2) + 'R';
+  el.innerHTML = tr.plans.map(p => `<div class="item"><div class="row"><span class="title">${esc(p.title)}</span>
+    <span class="pill ${p.result_r > 0 ? 'BUY' : (p.result_r < 0 ? 'SELL' : 'NEUTRAL')}">${sign(p.result_r)}</span></div>
+    <div class="muted">${esc(fmtTime(p.event_time))}</div></div>`).join('') +
+    `<div class="item row"><b>Jami (oxirgi ${tr.plans.length})</b><b>${sign(tr.total_r)}</b></div>`;
 }
 
 function tick() {
@@ -179,6 +204,7 @@ async function refresh() {
     renderFocus(); renderPlan();
     renderList('calendar', state.calendar, 'Yaqin 7 kunda muhim yangilik yo\'q.', false);
     renderList('results', state.results, 'Hali natija yo\'q.', true);
+    renderTrack(state.track_record);
     document.getElementById('error').textContent = '';
     tick();
   } catch (e) {
