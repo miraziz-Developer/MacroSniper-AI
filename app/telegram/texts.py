@@ -5,6 +5,7 @@ from html import escape
 from typing import Optional
 
 from app.models import Event, Plan
+from app.signals.plan import Status
 from app.signals import history
 from app.signals.rules import classify
 
@@ -115,6 +116,33 @@ def review_message(ev: Event, plan: Plan) -> str:
         f"🧾 <b>REJA NATIJASI</b>\n\n{escape(ev.title)} · {tashkent_time(ev.event_time)}\n{verdict}\n"
         f"<i>1R = stop-loss masofasi. Hisob 1 daqiqalik shamlar bo'yicha, sirpanish bilan.</i>"
     )
+
+
+def live_message(ev: Event, st: Status) -> str:
+    name = "BUY" if st.side == 1 else "SELL"
+    head = f"📡 <b>{escape(ev.title)}</b> · jonli\n"
+    if st.phase == "open":
+        return (
+            f"{head}⚡ <b>{name} STOP ochildi</b> @ <code>{st.entry:.2f}</code> — qarshi orderni bekor qiling.\n"
+            f"SL <code>{st.stop:.2f}</code> ({_pips(st.entry - st.stop)}) · TP1 <code>{st.tp1:.2f}</code> "
+            f"({_pips(st.tp1 - st.entry)}) · TP2 <code>{st.tp2:.2f}</code> ({_pips(st.tp2 - st.entry)})"
+        )
+    if st.phase == "tp1":
+        return (
+            f"{head}✅ <b>TP1 urildi</b> ({_pips(st.tp1 - st.entry)}). Yarmini yoping va SL ni "
+            f"<code>{st.entry:.2f}</code> ga (kirish narxi) o'tkazing — bitim endi zararsiz. Keyingi maqsad TP2 "
+            f"<code>{st.tp2:.2f}</code>."
+        )
+    if st.phase == "cancelled":
+        return f"{head}⚪ 30 daqiqada hech bir order ochilmadi — ikkalasini ham bekor qiling."
+    verdict = {
+        "tp2": "🏆 <b>TP2 urildi</b> — bitim to'liq yopildi.",
+        "sl": "❌ <b>SL urildi</b> — bitim yopildi.",
+        "breakeven": "⚪ Qolgan yarmi kirish narxida yopildi (TP1 foydasi saqlandi).",
+        "time": "⏱ 2 soat tugadi — qolgan pozitsiyani bozor narxida yoping.",
+        "whipsaw": "⚠️ Narx bir daqiqada ikkala orderni ham urdi — ikkalasini yoping.",
+    }[st.exit]
+    return f"{head}{verdict}\nNatija: <b>{st.result_r:+.2f}R</b>"
 
 
 def teaser_message(ev: Event) -> str:

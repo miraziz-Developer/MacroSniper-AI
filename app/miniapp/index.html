@@ -62,6 +62,7 @@
 
   <h2>Savdo rejasi</h2>
   <section class="card" id="plan"></section>
+  <section class="card hidden-live" id="live" style="margin-top:10px; display:none"></section>
 
   <h2>Kalendar (7 kun, AQSH)</h2>
   <section class="card list" id="calendar"></section>
@@ -228,8 +229,31 @@ async function buyVip() {
   }
 }
 
+const pips = (d) => Math.round(Math.abs(d) * 10) + ' pips';
+const LIVE_TEXT = {
+  pending: () => 'Reja tayyor — yangilik chiqishini kutyapmiz.',
+  no_data: () => 'Narx ma\'lumoti kelmayapti, qayta urinilmoqda…',
+  waiting: (l) => `Orderlar hali ochilmadi · narx ${money(l.price)}`,
+  open: (l) => `⚡ ${l.side > 0 ? 'BUY' : 'SELL'} ochiq @ ${money(l.entry)} · narx ${money(l.price)}<br>TP1 gacha ${pips(l.tp1 - l.price)} · SL gacha ${pips(l.price - l.stop)}`,
+  tp1: (l) => `✅ TP1 urildi — SL kirishda (${money(l.entry)}), bitim zararsiz · narx ${money(l.price)}<br>TP2 gacha ${pips(l.tp2 - l.price)}`,
+  closed: (l) => `Bitim yopildi (${l.exit}) · natija <b>${l.result_r >= 0 ? '+' : ''}${l.result_r.toFixed(2)}R</b>`,
+  cancelled: () => '⚪ 30 daqiqada order ochilmadi — ikkalasini bekor qiling.',
+};
+
+async function pollLive() {
+  const box = document.getElementById('live');
+  if (!state || !state.plan || !state.user.is_vip) { box.style.display = 'none'; return; }
+  try {
+    const l = await api('/api/app/live');
+    if (!l.active) { box.style.display = 'none'; return; }
+    box.style.display = '';
+    box.innerHTML = `<div class="muted">📡 Jonli holat (har 1.5 soniyada)</div><div style="margin-top:6px">${(LIVE_TEXT[l.phase] || (() => esc(l.phase)))(l)}</div>`;
+  } catch (e) { /* keep last view */ }
+}
+
 refresh();
 setInterval(refresh, 15000);
+setInterval(pollLive, 1500);
 setInterval(tick, 1000);
 </script>
 </body>

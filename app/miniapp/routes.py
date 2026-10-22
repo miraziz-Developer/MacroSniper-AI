@@ -15,6 +15,7 @@ from app.core.db import get_db
 from app.core.security import validate_init_data
 from app.market import data as market
 from app.models import Event, EventState, Plan, User, utcnow
+from app.pipeline import orchestrator
 from app.signals import history
 from app.signals.rules import classify
 from app.telegram.bot import get_bot
@@ -138,6 +139,38 @@ async def app_state(
             "plans": [{"title": e.title, "event_time": e.event_time.isoformat(), "result_r": p.result_r} for p, e in reviewed],
             "total_r": round(sum(p.result_r for p, _ in reviewed), 2),
         },
+    }
+
+
+@router.get("/api/app/live")
+async def app_live(
+    x_telegram_init_data: Optional[str] = Header(None),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """VIP-only live state of the current plan (polled every ~1.5 s around the release)."""
+    user = await _viewer(db, x_telegram_init_data)
+    if user is None or not user.is_vip():
+        raise HTTPException(status_code=403, detail="VIP only")
+    now = utcnow()
+    row = (
+        await db.execute(
+            select(Plan, Event).join(Event, Plan.event_id == Event.id)
+            .where(Event.event_time >= now - timedelta(minutes=orchestrator.REVIEW_MINUTES + 5))
+            .order_by(Plan.id.desc()).limit(1)
+        )
+    ).first()
+    if row is None:
+        return {"active": False}
+    plan, ev = row
+    if now < ev.event_time:
+        return {"active": True, "phase": "pending", "release": ev.event_time.isoformat()}
+    live = await market._cached(f"live:{plan.id}", 1.5, lambda: orchestrator.live_status(plan, ev.event_time))
+    if live is None:
+        return {"active": True, "phase": "no_data"}
+    st, price = live
+    return {
+        "active": True, "phase": st.phase, "side": st.side, "price": price, "entry": st.entry,
+        "stop": st.stop, "tp1": st.tp1, "tp2": st.tp2, "exit": st.exit, "result_r": st.result_r,
     }
 
 

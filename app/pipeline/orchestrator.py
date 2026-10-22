@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from html import escape
-from typing import List
+from typing import List, Optional, Tuple
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from sqlalchemy import select
@@ -20,7 +20,7 @@ from app.market import data as market
 from app.models import Event, EventStage, EventState, Plan, utcnow
 from app.signals import history
 from app.signals.outcome import resolve
-from app.signals.plan import Side, TradePlan, build_plan, simulate
+from app.signals.plan import Side, Status, TradePlan, build_plan, simulate, track
 from app.signals.rules import classify
 from app.telegram import notifier, texts
 
@@ -30,7 +30,9 @@ POLL_WINDOW = timedelta(minutes=15)
 POLL_INTERVAL_SECONDS = 30
 REVIEW_MINUTES = 120  # plan is judged on the first 2 hours after release (same as the backtest)
 REVIEW_SLIPPAGE = 0.5
+LIVE_POLL_SECONDS = 3
 _polled: set = set()  # per-process guard: the periodic re-sync must not start a second poll loop
+_live: set = set()
 
 
 @dataclass(frozen=True)
@@ -230,3 +232,42 @@ async def run_review(event_id: int) -> bool:
     await notifier.send_many(vips, message, app_keyboard())
     await notifier.send_channel(message, app_keyboard(private=False))
     return True
+
+
+async def live_status(plan: Plan, event_time: datetime) -> Optional[Tuple[Status, float]]:
+    """(status, last price) from 1-minute candles since the release, including the still-forming minute."""
+    candles = await market.minute_candles(plan.price_source, event_time, REVIEW_MINUTES)
+    if not candles:
+        return None
+    status = track(to_trade_plan(plan), [(c.open, c.high, c.low, c.close) for c in candles], REVIEW_SLIPPAGE)
+    return status, candles[-1].close
+
+
+async def run_live(event_id: int) -> None:
+    """From the release until the plan is decided: push a VIP alert on every phase change (~3 s latency)."""
+    if event_id in _live:
+        return
+    _live.add(event_id)
+    async with SessionLocal() as session:
+        plan = (await session.execute(select(Plan).where(Plan.event_id == event_id))).scalar_one_or_none()
+        ev = await session.get(Event, event_id)
+    if plan is None or ev is None:
+        return
+    deadline = ev.event_time + timedelta(minutes=REVIEW_MINUTES + 2)
+    last_phase = "waiting"
+    while utcnow() < deadline:
+        if utcnow() >= ev.event_time:
+            live = await live_status(plan, ev.event_time)
+            status = live[0] if live else None
+            if status and status.phase != last_phase:
+                last_phase = status.phase
+                async with SessionLocal() as session:
+                    # stage rows make each alert at-most-once, even across restarts
+                    fresh = status.phase == "waiting" or await _claim_stage(session, event_id, f"live_{status.phase}")
+                    vips = await active_vip_chat_ids(session) if fresh else []
+                if vips:
+                    await notifier.send_many(vips, texts.live_message(ev, status), app_keyboard())
+            if status and status.final:
+                return
+        await asyncio.sleep(LIVE_POLL_SECONDS)
+

@@ -64,37 +64,63 @@ def build_plan(
     )
 
 
-def simulate(plan: TradePlan, candles: Sequence[Candle], slippage: float = 0.5) -> Optional[float]:
-    """Result in R from 1-minute candles starting at the release minute.
+@dataclass(frozen=True)
+class Status:
+    """Where a plan stands after the given candles."""
+
+    phase: str  # waiting | open | tp1 (half banked, stop at entry) | closed | cancelled
+    side: int = 0  # +1 BUY, -1 SELL, 0 none
+    entry: float = 0.0
+    stop: float = 0.0
+    tp1: float = 0.0
+    tp2: float = 0.0
+    exit: str = ""  # when closed: tp2 | sl | breakeven | time | whipsaw
+    result_r: Optional[float] = None  # set once closed or cancelled
+
+    @property
+    def final(self) -> bool:
+        return self.phase in ("closed", "cancelled")
+
+
+def track(plan: TradePlan, candles: Sequence[Candle], slippage: float = 0.5) -> Status:
+    """Replay 1-minute candles from the release minute (the last one may still be forming).
 
     Conservative: a minute that touches both orders, or both stop and target, resolves against us.
-    Returns None when there are not yet enough candles to decide.
     """
     risk = plan.buy.entry - plan.buy.sl
-    side = 0
+    r = lambda price: (price - entry) * side / risk  # noqa: E731
+    side, half_done = 0, False
     for i, (_o, high, low, close) in enumerate(candles[:TIME_STOP_MIN]):
         if side == 0:
             if i >= CANCEL_AFTER_MIN:
-                return 0.0
+                return Status("cancelled", result_r=0.0)
             hit_buy, hit_sell = high >= plan.buy.entry, low <= plan.sell.entry
-            if hit_buy and hit_sell:
-                return round(-1.0 - 2 * slippage / risk, 3)  # whipsaw through both orders in one minute
+            if hit_buy and hit_sell:  # whipsaw through both orders in one minute
+                return Status("closed", exit="whipsaw", result_r=round(-1.0 - 2 * slippage / risk, 3))
             if not (hit_buy or hit_sell):
                 continue
             side = 1 if hit_buy else -1
             leg = plan.buy if hit_buy else plan.sell
             entry = leg.entry + side * slippage
             stop, tp1, tp2 = leg.sl, leg.tp1, leg.tp2
-            half_done = False
         adverse, favour = (low, high) if side == 1 else (high, low)
         if (adverse - stop) * side <= 0:
-            exit_r = (stop - entry) * side / risk
-            return round(0.5 * (tp1 - entry) * side / risk + 0.5 * exit_r if half_done else exit_r, 3)
+            exit_r = r(stop)
+            result = 0.5 * r(tp1) + 0.5 * exit_r if half_done else exit_r
+            return Status("closed", side, entry, stop, tp1, tp2, "breakeven" if half_done else "sl", round(result, 3))
         if not half_done and (favour - tp1) * side >= 0:
             half_done, stop = True, entry
         if half_done and (favour - tp2) * side >= 0:
-            return round(0.5 * (tp1 - entry) * side / risk + 0.5 * (tp2 - entry) * side / risk, 3)
+            return Status("closed", side, entry, stop, tp1, tp2, "tp2", round(0.5 * r(tp1) + 0.5 * r(tp2), 3))
         if i == TIME_STOP_MIN - 1:
-            open_r = (close - entry) * side / risk
-            return round(0.5 * (tp1 - entry) * side / risk + 0.5 * open_r if half_done else open_r, 3)
-    return None  # not enough candles yet
+            result = 0.5 * r(tp1) + 0.5 * r(close) if half_done else r(close)
+            return Status("closed", side, entry, stop, tp1, tp2, "time", round(result, 3))
+    if side == 0:
+        return Status("waiting")
+    return Status("tp1" if half_done else "open", side, entry, stop, tp1, tp2)
+
+
+def simulate(plan: TradePlan, candles: Sequence[Candle], slippage: float = 0.5) -> Optional[float]:
+    """Result in R once decided; None when there are not yet enough candles."""
+    status = track(plan, candles, slippage)
+    return status.result_r if status.final else None
