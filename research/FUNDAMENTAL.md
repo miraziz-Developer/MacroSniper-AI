@@ -39,3 +39,15 @@ Calibration of the gold probability (all releases pooled):
 - 0.45–0.55: predicted 50%, happened 52% (n=682)
 - 0.55–0.60: predicted 57%, happened 58% (n=227)
 - 0.60–1.00: predicted 61%, happened 45% (n=33)
+
+## 3. Live odds the bot quotes
+
+P(gold is on the expected side 15 min after release | minutes elapsed, move so far in 15m ATRs):
+
+| minute | < −0.5 ATR | −0.5…0 | 0…0.5 | 0.5…1 | > 1 ATR |
+|---|---|---|---|---|---|
+| 1 | 29% (n=287) | 40% (n=289) | 57% (n=513) | 72% (n=397) | 86% (n=822) |
+| 2 | 19% (n=350) | 45% (n=271) | 56% (n=409) | 70% (n=398) | 90% (n=880) |
+| 3 | 17% (n=355) | 40% (n=287) | 57% (n=401) | 74% (n=350) | 90% (n=915) |
+| 5 | 15% (n=421) | 36% (n=266) | 59% (n=352) | 78% (n=318) | 92% (n=951) |
+| 10 | 7% (n=498) | 30% (n=253) | 66% (n=298) | 88% (n=308) | 96% (n=951) |

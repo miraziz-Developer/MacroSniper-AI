@@ -178,5 +178,72 @@ def main(data_dir: str) -> None:
     print("\n".join(lines))
 
 
+SIZE_EDGES = (0.5, 1.5)  # |surprise| / usual size: small < 0.5 <= medium < 1.5 <= large
+LIVE_MINUTES = (1, 2, 3, 5, 10)
+MOVE_EDGES = (-0.5, 0.0, 0.5, 1.0)  # signed move toward the expected side, in 15m ATRs
+
+
+def _bucket(value: float, edges) -> int:
+    return sum(value >= e for e in edges)
+
+
+def export_live_tables(data_dir: str) -> List[str]:
+    """Tables the bot quotes live: odds by surprise size at release, then odds given how price has moved."""
+    import json
+
+    from app.calendar.forexfactory import parse_number  # same units as the live calendar (225K -> 225)
+
+    raw = pd.read_csv(f"{data_dir}/data_ff/forex_factory_cache.csv", usecols=["DateTime", "Currency", "Event", "Actual", "Forecast"])
+    raw = raw[(raw.Currency == "USD") & raw.Event.isin(SERIES)].copy()
+    raw["day"] = raw.DateTime.str.slice(0, 10).map(date.fromisoformat)
+    raw["surprise"] = raw.Actual.map(parse_number) - raw.Forecast.map(parse_number)
+    raw = raw.dropna(subset=["surprise"]).drop_duplicates(["Event", "day"])
+    raw = raw[raw.day >= date(2012, 1, 1)]
+
+    scale, by_size, live = {}, {}, {}
+    for title, g in raw.groupby("Event"):
+        scale[title] = float(g[g.surprise != 0].surprise.abs().median())  # median: COVID-era outliers distort a mean
+        counts = {b: [0, 0, 0] for b in range(3)}  # n, against_1m, against_15m
+        for _, r in g[g.surprise != 0].iterrows():
+            f = gold_features(f"{data_dir}/duka", release_time_utc(r.day, SERIES[title][1]))
+            if not f or not f["atr"]:
+                continue
+            expected = -np.sign(r.surprise) * (-1 if title in USD_DOWN_WHEN_HIGHER else 1)  # gold side
+            size = _bucket(abs(r.surprise) / scale[title], SIZE_EDGES)
+            c = counts[size]
+            c[0] += 1
+            c[1] += np.sign(f["ret1"]) == expected
+            c[2] += np.sign(f["ret15"]) == expected
+            closes = [x[3] for x in f["post"]]
+            for k in LIVE_MINUTES:
+                move = (closes[k - 1] - f["p0"]) * expected / f["atr"]
+                cell = live.setdefault(f"{k}:{_bucket(move, MOVE_EDGES)}", [0, 0])
+                cell[0] += 1
+                cell[1] += np.sign(f["ret15"]) == expected
+        by_size[title] = {str(b): {"n": n, "p1": round((a1 + 1) / (n + 2), 3), "p15": round((a15 + 1) / (n + 2), 3)}
+                          for b, (n, a1, a15) in counts.items() if n >= 8}
+
+    stats_path = "app/signals/stats.json"
+    stats = json.load(open(stats_path))
+    stats["surprise_scale"] = {k: round(v, 6) for k, v in scale.items()}
+    stats["odds_by_size"] = by_size
+    stats["live_odds"] = {k: {"n": n, "p15": round((h + 1) / (n + 2), 3)} for k, (n, h) in sorted(live.items())}
+    stats["live_grid"] = {"minutes": list(LIVE_MINUTES), "move_edges_atr": list(MOVE_EDGES), "size_edges": list(SIZE_EDGES)}
+    with open(stats_path, "w") as f:
+        json.dump(stats, f, indent=2, ensure_ascii=False)
+
+    lines = ["", "## 3. Live odds the bot quotes", "",
+             "P(gold is on the expected side 15 min after release | minutes elapsed, move so far in 15m ATRs):", "",
+             "| minute | < −0.5 ATR | −0.5…0 | 0…0.5 | 0.5…1 | > 1 ATR |", "|---|---|---|---|---|---|"]
+    for k in LIVE_MINUTES:
+        cells = [stats["live_odds"].get(f"{k}:{b}") for b in range(5)]
+        lines.append(f"| {k} | " + " | ".join(f"{c['p15']:.0%} (n={c['n']})" if c else "—" for c in cells) + " |")
+    return lines
+
+
 if __name__ == "__main__":
     main(sys.argv[1])
+    extra = export_live_tables(sys.argv[1])
+    with open("research/FUNDAMENTAL.md", "a") as f:
+        f.write("\n".join(extra) + "\n")
+    print("\n".join(extra))

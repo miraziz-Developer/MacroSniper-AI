@@ -167,10 +167,12 @@ async def app_live(
     live = await market._cached(f"live:{plan.id}", 1.5, lambda: orchestrator.live_status(plan, ev.event_time))
     if live is None:
         return {"active": True, "phase": "no_data"}
-    st, price = live
+    st, price, p0, minutes = live
+    await db.refresh(ev)  # the actual may have been entered seconds ago
     return {
         "active": True, "phase": st.phase, "side": st.side, "price": price, "entry": st.entry,
         "stop": st.stop, "tp1": st.tp1, "tp2": st.tp2, "exit": st.exit, "result_r": st.result_r,
+        "minutes": minutes, "odds": orchestrator.live_odds(ev, plan, price, p0, minutes),
     }
 
 

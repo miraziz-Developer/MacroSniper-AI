@@ -234,13 +234,17 @@ async def run_review(event_id: int) -> bool:
     return True
 
 
-async def live_status(plan: Plan, event_time: datetime) -> Optional[Tuple[Status, float]]:
-    """(status, last price) from 1-minute candles since the release, including the still-forming minute."""
+async def live_status(plan: Plan, event_time: datetime) -> Optional[Tuple[Status, float, float, int]]:
+    """(status, last price, release-minute open, minutes elapsed) from 1-minute candles incl. the forming one."""
     candles = await market.minute_candles(plan.price_source, event_time, REVIEW_MINUTES)
     if not candles:
         return None
     status = track(to_trade_plan(plan), [(c.open, c.high, c.low, c.close) for c in candles], REVIEW_SLIPPAGE)
-    return status, candles[-1].close
+    return status, candles[-1].close, candles[0].open, len(candles) - 1
+
+
+def live_odds(ev: Event, plan: Plan, price: float, p0: float, minutes: int) -> Optional[dict]:
+    return history.odds(ev.title, ev.actual, ev.forecast, minutes, p0, price, plan.atr)
 
 
 async def run_live(event_id: int) -> None:
@@ -262,11 +266,13 @@ async def run_live(event_id: int) -> None:
             if status and status.phase != last_phase:
                 last_phase = status.phase
                 async with SessionLocal() as session:
+                    ev = await session.get(Event, event_id)  # the actual may have arrived meanwhile
                     # stage rows make each alert at-most-once, even across restarts
                     fresh = status.phase == "waiting" or await _claim_stage(session, event_id, f"live_{status.phase}")
                     vips = await active_vip_chat_ids(session) if fresh else []
                 if vips:
-                    await notifier.send_many(vips, texts.live_message(ev, status), app_keyboard())
+                    odds = live_odds(ev, plan, live[1], live[2], live[3])
+                    await notifier.send_many(vips, texts.live_message(ev, status, odds), app_keyboard())
             if status and status.final:
                 return
         await asyncio.sleep(LIVE_POLL_SECONDS)
