@@ -31,3 +31,5 @@ services:
         value: "500"
       - key: VIP_DAYS
         value: "30"
+      - key: PROMO_CODE
+        sync: false

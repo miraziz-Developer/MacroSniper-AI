@@ -33,7 +33,7 @@ PYTHONPATH=. python research/analyze.py DATA_DIR   # REPORT.md va app/signals/st
 
 | Hamma | Admin (`TELEGRAM_ADMIN_IDS`) |
 |---|---|
-| `/start` `/events` `/plan` `/results` `/status` `/vip` `/paysupport` | `/stats` · `/grant ID KUN` · `/revoke ID` · `/actual EVENT_ID QIYMAT` (ID'lar `/events` da) |
+| `/start` `/events` `/plan` `/results` `/status` `/vip` `/promo KOD` `/paysupport` | `/stats` · `/grant ID KUN` · `/revoke ID` · `/actual EVENT_ID QIYMAT` (ID'lar `/events` da) |
 
 ## Lokal ishga tushirish
 

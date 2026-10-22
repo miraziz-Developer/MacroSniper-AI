@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     VIP_PRICE_STARS: int = 500
     VIP_DAYS: int = 30
 
+    # Free VIP via /promo CODE: each person once, at most PROMO_LIMIT people in total; unset = disabled
+    PROMO_CODE: Optional[str] = None
+    PROMO_LIMIT: int = 2
+    PROMO_DAYS: int = 30
+
     @field_validator("DATABASE_URL")
     @classmethod
     def _normalize_db(cls, v: str) -> str:
