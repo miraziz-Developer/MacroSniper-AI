@@ -32,7 +32,7 @@ class UTCDateTime(TypeDecorator):
 
 class EventState(str, enum.Enum):
     SCHEDULED = "SCHEDULED"  # from calendar, nothing done yet
-    CONTEXT_READY = "CONTEXT_READY"  # T-3h preview (historical scenarios) sent
+    CONTEXT_READY = "CONTEXT_READY"  # T-2h preview (historical scenarios) sent
     PLAN_SENT = "PLAN_SENT"  # T-2m trade plan delivered
     RESOLVED = "RESOLVED"  # actual received, outcome published
     SKIPPED = "SKIPPED"  # not a numeric release we can plan (e.g. speeches)

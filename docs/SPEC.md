@@ -31,7 +31,7 @@ Topilmalar:
   boshqa yangiliklarda manfiy. Reja faqat backtest'i musbat bo'lgan yangiliklarga beriladi.
 
 Bosqichlar (faqat rejaga loyiq yangiliklar uchun):
-1. **T-3h — Preview:** tarixiy ssenariylar va rejaning tarixiy natijasi.
+1. **T-2h — Preview:** tarixiy ssenariylar va rejaning tarixiy natijasi.
 2. **T-2m — Reja:** 15m ATR(14) va 4 soatlik diapazon; kirish diapazondan tashqarida 0.3–0.8 ATR,
    SL 2 ATR (=1R), TP1 1.5R (yarmi, SL→kirish), TP2 3R, 30 daqiqada ochilmasa bekor, 2 soatda yopiladi.
 3. **T+0 — Natija:** fakt − prognoz → kutilgan yo'nalish va uning tarixiy ehtimoli.
