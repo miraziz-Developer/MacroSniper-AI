@@ -21,6 +21,7 @@ _NUM = re.compile(r"[-+]?\d*\.?\d+")
 
 _memory: List[Dict[str, Any]] = []
 _fetched_at = 0.0
+last_source = "none"  # which feed the calendar came from (shown in /health)
 
 
 @dataclass(frozen=True)
@@ -81,7 +82,7 @@ def _cache_path() -> str:
 
 
 async def _load_raw() -> List[Dict[str, Any]]:
-    global _memory, _fetched_at
+    global _memory, _fetched_at, last_source
     if _memory and time.time() - _fetched_at < CACHE_TTL_SECONDS:
         return _memory
     # Cloudflare in front of ForexFactory often blocks cloud IPs; the GitHub mirror is the fallback
@@ -91,7 +92,7 @@ async def _load_raw() -> List[Dict[str, Any]]:
                 res = await client.get(url)
             data = res.json() if res.status_code == 200 else None
             if isinstance(data, list) and data:
-                _memory, _fetched_at = data, time.time()
+                _memory, _fetched_at, last_source = data, time.time(), url
                 os.makedirs(settings.DATA_DIR, exist_ok=True)
                 with open(_cache_path(), "w") as f:
                     json.dump(_memory, f)
