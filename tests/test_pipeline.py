@@ -294,3 +294,12 @@ async def test_slow_bls_request_does_not_block_a_fast_one(monkeypatch):
     monkeypatch.setattr(orchestrator, "BLS_INTERVAL_FREE", 0.01)
     assert await orchestrator._race_bls(NFP, utcnow()) == 29.0
     assert len(calls) == 2
+
+
+async def test_sync_failure_is_recorded_not_raised(monkeypatch):
+    async def boom():
+        raise RuntimeError("feed down")
+
+    monkeypatch.setattr(scheduler.orchestrator, "sync_calendar", boom)
+    assert await scheduler.sync_and_schedule() == 0
+    assert "RuntimeError: feed down" in scheduler.last_sync["error"]

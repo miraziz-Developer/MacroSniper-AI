@@ -137,3 +137,8 @@ async def test_live_endpoint_is_vip_only(client, monkeypatch):
     routes.market._cache.clear()
     odds = (await client.get("/api/app/live", headers=free)).json()["odds"]
     assert odds["side"] == "BUY" and 0.5 < odds["p"] < 1
+
+
+async def test_health_reports_calendar_sync(client):
+    body = (await client.get("/health")).json()
+    assert {"at", "events", "error", "source"} <= set(body["calendar"]) and "scheduled_jobs" in body

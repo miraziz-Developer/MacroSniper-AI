@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, Optional
@@ -62,10 +63,21 @@ def schedule_event(ref: orchestrator.EventRef, now: Optional[datetime] = None) -
         )
 
 
+SYNC_TIMEOUT_SECONDS = 120
+last_sync: Dict[str, Optional[object]] = {"at": None, "events": None, "error": None}
+
+
 async def sync_and_schedule() -> int:
-    refs = await orchestrator.sync_calendar()
+    try:
+        # A hung run would block every later one (max_instances=1), so it is cut off
+        refs = await asyncio.wait_for(orchestrator.sync_calendar(), SYNC_TIMEOUT_SECONDS)
+    except Exception as e:
+        last_sync["error"] = f"{utcnow():%Y-%m-%d %H:%M} {type(e).__name__}: {e}"[:300]
+        logger.exception("Calendar sync failed")
+        return 0
     for ref in refs:
         schedule_event(ref)
+    last_sync.update(at=utcnow().isoformat(), events=len(refs), error=None)
     logger.info("Calendar synced: %d active event(s)", len(refs))
     return len(refs)
 
@@ -86,7 +98,8 @@ def start() -> None:
         scheduler.add_job(keep_awake, "interval", minutes=10, id="keep_awake", replace_existing=True)
     # First sync right away, then every 10 min: retries soon after a ForexFactory 429 on a fresh instance
     scheduler.add_job(
-        sync_and_schedule, "interval", minutes=10, id="calendar_sync", next_run_time=utcnow(), replace_existing=True
+        sync_and_schedule, "interval", minutes=10, id="calendar_sync", next_run_time=utcnow(), replace_existing=True,
+        misfire_grace_time=300, coalesce=True,  # a late tick still runs (default grace is 1 s)
     )
     scheduler.start()
 

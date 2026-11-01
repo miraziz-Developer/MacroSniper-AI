@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.calendar import forexfactory
 from app.core.config import settings
 from app.core.db import db_alive, get_db, init_db
 from app.core.security import require_admin
@@ -53,6 +54,8 @@ async def health():
         "database": db_ok,
         "scheduler": scheduler.scheduler.running,
         "bot": settings.bot_enabled,
+        "calendar": {**scheduler.last_sync, "source": forexfactory.last_source},
+        "scheduled_jobs": len(scheduler.scheduler.get_jobs()),
         "server_time_utc": utcnow().isoformat(),
     }
     if not db_ok:
